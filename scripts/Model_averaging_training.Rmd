@@ -1,0 +1,597 @@
+---
+title: "IT-based model averaging"
+author: "Alexa Varah"
+date: "05/01/2021"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Information theoretic (IT)-based model averaging allows inferences to be drawn from weighted support over several models (multi-model inference, MMI).
+
+# Concept
+
+The data is 'correct'.  
+We’re looking to see which effects (parameters) are supported by the data.  
+We’re aiming for the data-based selection of a set of best models. In other words, we'll examine the likelihood of various models (i.e., various hypotheses about reality), given the data. Inference is based on more than one model.   
+
+**Why information theoretic?** We use existing knowledge to inform _a priori_ the choice of predictor variables in our model (i.e., _before we look at the data_!), rather than using the data to inform our choice of variables. 
+
+**Why model averaging?** The benefit of using multiple models is that they can be ranked and scaled to show model uncertainty over the set. *All* models are then used for inference. "If one has a large number of closely related models, such as in linear-regression based variable selection .... designation of a single best model is unsatisfactory because that 'best' model is often highly variable. That is, the model estimated to be best would vary from data set to data set, where replicate data sets would be collected under the same underlying process. In this situation, model averaging provides a relatively much more stabilized inference." (p.151, Burnham & Anderson 2002).
+
+IT-based MMI is good for:  
+
+* observational data 
+*	data with lots of potential predictor variables  
+*	messy data  
+*	small datasets  
+
+... in other words, many ecological data sets.
+
+Although IT-based MMI is not completely free of the disadvantages of stepwise methods, it suffers less from the following drawbacks of stepwise methods:  
+
+* Stepwise methods ignore model uncertainty (they test only a fraction of all possible models). This problem is exacerbated in smaller datasets and in inter-related predictors.  
+*	Stepwise methods use subjective critical values (e.g. p < 0.05), leading to the assumption of zero effects of terms not in the final model. This is unlikely to be true for ecological data.  
+*	Stepwise methods can lead to parameter estimation bias, with the risk that the final model will contain overestimated effect sizes.  
+&nbsp;
+
+
+The process involves _a priori_ model specification, then model selection, and finally estimation of parameters and their precision.  
+&nbsp; 
+
+We'll assume that we've identified possible predictor variables through a literature search. *N.B.* This should be done _before_ you even do fieldwork! Once you've collected data you can do some basic data exploration (but NO data dredging or modelling!).  
+
+We'll now load the dataset and get modelling.
+
+
+# Load packages
+
+```{r Load-packages, message=FALSE}
+rm(list=ls())
+library(dplyr) # for easy data manipulation (includes packages dplyr, tidyr, stringr, ggplot2, purr, tibble, readr, forcats)
+library(tibble)
+library(stringr)
+library(MASS) # for stats
+library(lme4) # for mixed effects models
+library(arm) # for standardizing variables
+library(MuMIn) # for multi-model inference
+library(knitr)
+library(kableExtra) # for working with tables
+```
+
+
+# Generate some data
+
+We're going to work with real site data from English agroforestry and monoculture fields, but we will generate fake abundance data to make modelling easier.  
+Metadata for the site variables is on Figshare [here](https://figshare.com/articles/dataset/Transect_walk_data_collected_in_English_agroforestry_and_monoculture_fields_/28770587). In brief, there are five English farms, each of which has an agroforestry (AF) and monoculture control (MC) treatment, sampled over two years. 
+
+Load and tidy the data and generate fake abundances.
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+abundance_data <- read.csv('../data/solitary_bees_clean.csv', header = TRUE) %>% 
+  dplyr::mutate(
+    date = trimws(date),  # remove any leading/trailing whitespace
+    date = as.Date(date, format = "%Y-%m-%d"), # ensure date is formatted correctly
+    site = factor(site), # set as factor
+    treatment = factor(treatment), # set as factor
+    year = factor(year), # set as factor
+    # create a julian date (number of days since 1st March)
+    jdate = difftime(date, as.Date(paste(01, 03, year, sep="-"),"%d-%m-%Y")),
+    jdate = as.integer(jdate)
+  ) %>% 
+  # just retain the site data
+  dplyr::select(site:snh, jdate) %>% 
+  dplyr::relocate(jdate, .after = date) %>% 
+  # remove year 2013
+  dplyr::filter(!year == "2013") %>% 
+  droplevels() %>% 
+  # fill in the missing data on boundary area from site WAF - use made-up values
+  dplyr::mutate(bound_area = ifelse(
+    is.na(bound_area) & site == "WAF" & year == 2011 & treatment == "AF", 2000,
+    ifelse(is.na(bound_area) & site == "WAF" & year == 2011 & treatment == "MC", 2050, bound_area)
+  )) %>% 
+  # Generate some other variables that might affect sampled insect abundance
+  dplyr::mutate(sun = ifelse(treatment == "AF",
+                             rnorm(n(), mean = 60, sd = 10),
+                             rnorm(n(), mean = 65, sd = 10)),
+                sun = pmin(pmax(sun, 30), 100), # clamp between 30 and 100
+                sun = as.integer(sun)) %>% 
+  # Generate new abundance columns
+  # create a fake site effect, too
+  dplyr::mutate(
+    butterfly_abundance = case_when(
+      treatment == "AF" & site == "CE" ~ rpois(n(), lambda = 14),
+      treatment == "AF" & site == "LHF" ~ rpois(n(), lambda = 10),
+      treatment == "AF" & site == "RR" ~ rpois(n(), lambda = 13),
+      treatment == "AF" & site == "SD" ~ rpois(n(), lambda = 18),
+      treatment == "AF" & site == "WAF" ~ rpois(n(), lambda = 25),
+      treatment == "AF" & site == "WH" ~ rpois(n(), lambda = 21),
+      
+      treatment == "MC" & site == "CE" ~ rpois(n(), lambda = 9),
+      treatment == "MC" & site == "LHF" ~ rpois(n(), lambda = 7),
+      treatment == "MC" & site == "RR" ~ rpois(n(), lambda = 15),
+      treatment == "MC" & site == "SD" ~ rpois(n(), lambda = 11),
+      treatment == "MC" & site == "WAF" ~ rpois(n(), lambda = 19),
+      treatment == "MC" & site == "WH" ~ rpois(n(), lambda = 16),      
+      TRUE ~ rpois(n(), lambda = 8)  # default fallback
+    #),
+    # bee_abundance = case_when(
+    #   treatment == "AF" & site == "WAF" ~ rpois(n(), lambda = 22),
+    #   treatment == "AF" & site == "EAF" ~ rpois(n(), lambda = 18),
+    #   treatment == "MC" & site == "WAF" ~ rpois(n(), lambda = 16),
+    #   treatment == "MC" & site == "EAF" ~ rpois(n(), lambda = 13),
+    #   TRUE ~ rpois(n(), lambda = 15)
+    )
+  )
+
+# add in system age
+# site <- c('WH','SD','WAF', 'RR', 'CE', 'LHF')
+# age <- c(2,9,14,24,24,18)
+# df <- data.frame (site, age)
+# abundance_data <- merge(abundance_data, df, by="site")
+```
+
+
+
+# Inspect data
+```{r}
+glimpse(abundance_data)
+```
+
+Treatments were sampled equally in each year:
+```{r}
+table(abundance_data$treatment, abundance_data$year)
+```
+
+Treatments within each site were sampled equally (two sampling events per site per month), but sites were not sampled equally:
+```{r}
+table(abundance_data$site, abundance_data$month, abundance_data$year)
+```
+
+Let's look at how many fields were in each site.
+```{r}
+table(abundance_data$site, abundance_data$field)
+```
+You can see that at some sites, both treatments were in the same field (e.g., CE & RR). At other sites, the treatments were in different fields in different years (e.g., SD, WH).    
+This is a typical ecological dataset. There are lots of other variables that might be affecting insect abundances, and some sites sampled more often than others, although thankfully each treatment is sampled equally within sites. We're not going to focus on the sampling details here, but when using your own data you would of course need to think about how to account for  hierarchical designs, unequal sampling, lots of zeros in your data, etc. when considering your approach and model specification. The aim for this session is just to show you the mechanics of multi-model inference, which is particularly useful for datasets where there are lots of potentially influential variables.  
+
+
+
+```{r Load-and-prep-data, echo=FALSE, message=FALSE, warning = FALSE, results='hide'}
+workingdir = "C:/Users/alexv2/OneDrive - Natural History Museum/PhD/PhD manuscripts/Biodiversity"
+setwd(workingdir) # output will go into pollination folder
+
+transect = read_xlsx("C:/Users/alexv2/OneDrive - Natural History Museum/PhD/data/Transect data_master.xlsx",2)
+
+lep = subset(transect, select=c(site:butact,LEPIDOPTERA)) %>% # extract just the columns relevant to bumblebee analyses
+  rename(butt=LEPIDOPTERA)  %>% 
+  mutate(
+    site = factor(site),
+    site = recode(site, "seh" = "waf"),
+    site = recode(site, "mc" = "ce"),
+    visit = factor(visit),
+    year = factor(year),
+    date = as.Date(paste(day, month, year, sep="-"), "%d-%m-%Y"), # concatenate day, month, year to create date
+    monthtxt = month.abb[month],
+    yrmth = paste(year, month, sep="-"), # create a new vector of month-year
+    jdate = difftime(date, as.Date(paste(01, 03, year, sep="-"),"%d-%m-%Y"), units = c("days")), # calc days since 1st March. 
+    landuse = factor(landuse),
+    treatment = factor(treatment),
+    field = factor(field),
+    bound.area = as.numeric(bound.area),
+    n.hedg.bound = as.numeric(n.hedg.bound),
+    snh = as.numeric(snh),
+    starttime = times(strftime(start,"%H:%M:%S")), # convert to just time (removes date, which was wrong date anyway)
+    endtime = times(strftime(end,"%H:%M:%S")), # convert to just time (removes date, which was wrong date anyway)
+    windfac = factor(wind),
+    wind3 = factor(1+(windfac=="2")+2*(windfac=="3")+2*(windfac=="4")), # get rid of the one value of 4 in windstrength
+    butt = as.numeric(butt) 
+  )  %>% 
+  filter(!( (year == '2011' & site == 'waf' ) )) %>% # Filter out WAF 2011
+  filter(!is.na(butt))  %>% # remove rows where there is an NA in butterfly column  
+  subset( select = -c(start, end)) %>% # drop these columns
+  droplevels() %>% # get rid of any unused levels, i.e. SEH
+  
+  # Rescale some of the variables that are on very different scales. Here we rescale them to values between 0 and 1
+  # (they need to be numeric before we can rescale them)
+  mutate_at('jdate',as.numeric) %>% 
+  mutate(resc.bound.area = (bound.area - min(bound.area)) / ( max(bound.area) - min(bound.area) ),
+         resc.alleylength = (alleylength - min(alleylength)) / ( max(alleylength) - min(alleylength) ),
+         resc.sun = (sun - min(sun)) / ( max(sun) - min(sun) ),
+         resc.hedg.dist = (hedg.dist - min(hedg.dist)) / ( max(hedg.dist) - min(hedg.dist) ),
+         resc.jdate = (jdate - min(jdate)) / ( max(jdate) - min(jdate) )
+         ) %>%
+  mutate(ID = paste(site, treatment, visit, sep = '-') )  %>% # make site-treatment-visit identifier
+  group_by(ID) %>% # grouping factor for sum
+  mutate(butt_total = sum(butt)) %>% # sum butterfly counts per site-treatment-visit combo
+  distinct(ID, .keep_all = TRUE) %>% # keep only one row per ID
+  droplevels() %>% # drop empty factor levels i.e. SEH
+  # pull out the columns we want to keep (N.B. dplyr 'select' can clash with MASS so use 'dplyr::select' to ensure we're using 'select' from dplyr)
+  dplyr::select("ID", "site", "visit", "treatment", "landuse", "yrmth", "year", "month", "monthtxt", "date", 
+                "butt_total", "boundSR.all", "boundSR.ip", "n.hedg.bound", "snh", "sun", "resc.sun", "hedg.dist", "resc.hedg.dist", 
+                "bound.area", "resc.bound.area", "jdate", "resc.jdate", "wind3") %>% 
+  droplevels()  %>%
+  arrange(site, visit, treatment) # sort data
+
+# add in system age
+site <- c('wh','sd','waf', 'rr', 'ce', 'lhf')
+age <- c(2,9,14,24,24,18)
+df <- data.frame (site, age)
+lep <- merge(lep, df, by="site")
+```
+&nbsp; 
+
+# Model
+
+## 1. Build a highly parameterised global model
+
+…but don’t overfit.
+
+Use the predictor variables identified from (a) the literature, (b) your existing knowledge, and (c) any initial data exploration to build a 'global' model. Ideally, the global model has in it all the variables thought to be important, although it may be impossible to fit a global model if sample size is very small. In this example, the global model is a GLMM with a Poisson error structure because the data are counts of butterflies and have a hierarchical structure (fields within sites). Check goodness-of-fit, overdispersion, correlated variables etc. in the usual way. Because the data set used here is small, we can not include every potential predictor variable, so we will include only those which were likely to have the largest effect on butterfly abundance (based on the previous _a priori_ work).  
+
+```{r Build-global-model-norescaling}
+gm_notrescaled <- glmer(butterfly_abundance ~ treatment + landuse + bound_area + n_hedg_bound + sun + jdate + 
+                                     treatment:landuse + (1|site), poisson, data=abundance_data,
+                        na.action = "na.fail", 
+                        glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1000000))
+                       )
+```
+
+We get a warning about the predictor variables being on different scales. We need to rescale them.  
+
+## 2. Rescale variables
+You can do this in several ways (the method you choose _may_ give you different parameter estimates):
+
+* Use the [*scale*](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/scale) function in [base](https://www.rdocumentation.org/packages/base/versions/3.6.2) R. *Scale* gives values centered around zero by subtracting the mean of the variable from each value of the variable, then dividing by 1 standard deviation.
+* Use the [*rescale*](https://www.rdocumentation.org/packages/scales/versions/0.4.1/topics/rescale) function in the *scales* package, which rescales numeric vectors to have a specified maximum and minimum (default is 0-1).
+* Use the [*standardize*](https://www.rdocumentation.org/packages/arm/versions/1.11-2/topics/standardize) function in the [*arm*](https://www.rdocumentation.org/packages/arm/versions/1.11-2/topics/standardize) package, which you can apply to a model rather than individual variables. It centers predictor variables and divides by 2 standard deviations. Numeric variables that take on more than two values are each rescaled to have a mean of 0 and a sd of 0.5; Binary variables are rescaled to have a mean of 0 and a difference of 1 between their two categories; Non-numeric variables that take on more than two values are unchanged; Variables that take on only one value are unchanged.  
+
+We'll use *standardize* to rescale all variables:
+```{r Rescale-global-model}
+gm <- standardize(gm_notrescaled, standardize.y = FALSE) # we don't want to standardize the response variable.
+summary(gm)
+```
+
+
+## 3. Check model fit
+
+Check the model fit in the usual way. Model fit is assessed for the global model ONLY. If the global model fits the data adequately, then a more parsimonious model will also fit the data.
+```{r Check-model}
+par(mfrow=c(1,1))
+
+qqnorm(resid(gm))
+qqline(resid(gm))
+
+hist(residuals(gm))
+```
+
+This will do for now - we're not concerned with model fit here as it's fake data anyway, we just want to learn the steps. However, we will check for overdispersion as we've used a Poisson error distribution.  
+```{r}
+library(performance)
+check_overdispersion(gm)
+```
+Once you are happy that your global model fits and doesn't violate any assumptions, you can go ahead with creating models for alternative hypotheses.  
+
+## 4. Generate all possible lower-dimensional sub-models
+
+...in effect, all possible hypotheses.  
+
+We use the *dredge* function from the [*MuMIN*](https://www.rdocumentation.org/packages/MuMIn/versions/1.43.17) package, which is a multi-model inference package. You won't keep all of the sub-models generated, just those with the highest relative worth.  
+
+This process can take a while (more predictors = more time).  
+
+```{r Generate-model-set}
+modset <- dredge(gm, rank = "AICc") # AICc is the default so 'rank =' is obsolete here. Rank options = AIC, QAIC, BIC.
+head(modset, n=10)
+```
+
+The output shows the top 6 models of all the possible sub-models, ranked by AIC~*c*~.  
+Column 1 is the model number in the set of generated sub-models. Column 2 is the estimated intercept. The following columns give the variables that are present in these models: where a variable is present in a model, the parameter estimate is given. Next are the degrees of freedom, the log likelihood ('logLik'), AIC~*c*~, the change in AIC~*c*~ ('delta'), and the Akaike weight ('weight').  
+The Akaike weight ($w$~*$i$*~) indicates the relative likelihood of a model, *given the data and the set of models*. Akaike weights are computed by normalising the likelihood values, and provide a way of scaling and interpreting the changes in AIC~*c*~ values. Akaike weights of all models in the set add up to 1, so if you add or remove a model from the set you need to recompute $w$~*$i$*~ for all the models in the new set. Unless the top model has $w$~*$i$*~ $\ge$ 0.9, you should use model averaging.
+
+In the output above, we can see that the 'best' model in the set is not convincingly the best model: the evidence ratio for model 3 versus model 68 is only 1.1 (i.e., $w$~0.238~ / $w$~0.213~ = 1.117). This weak support for the 'best' model suggests that we would expect to see a lot of variation in the selected best model from sample to sample if we could draw multiple independent samples; in other words, the data-based model selection uncertainty is likely to be high. This indicates that these data are inadequate to reach strong inference so we should definitely use model averaging to make more robust inference (MMI).   
+&nbsp; 
+
+## 4. Create a 'top models' set
+
+By comparing these models against each other to find their relative worth, we can refine the model set created in step 3 above, retaining just those models for which there is good empirical support. In this way we create a smaller set of candidate models to use for inference.  
+
+Models in the set are ranked by AIC (or AIC~*c*~ for small sample sizes, or QAIC for overdispersed data, etc.).  
+There is substantial empirical support for a model $i$ with difference in AIC from the top model ($\Delta$~$i$~) of 0-2, considerably less (but still some) support for models with $\Delta$~$i$~ = 4-7 and none for models with $\Delta$~$i$~ > 10 [(Burnham & Anderson 2002)](http://sutlib2.sut.ac.th/sut_contents/H79182.pdf). 
+
+You can choose which cut-off to use to create your set of 'best' or 'top' models. Here we want our 'top models' set to contain only those models that have substantial empirical support so we'll choose $\Delta$~$i$~ $\le$ 2. In our case, this should pull out the top 6 models.  
+```{r Get-top-models}
+topmods <- get.models(modset, subset = delta <2)
+```
+  
+How many models has this resulted in?
+```{r}
+length(topmods)
+```
+
+&nbsp; 
+
+## 5. Use the top models set for inference  
+
+There are four stages to this, the first two of which are done for you by the function *model.avg*:  
+
+### 5.1 Make parameter estimates averaged across the top model set 
+The function *model.avg* computes weighted estimates of the predicted values, weighting the predictions by the Akaike weights. The model output will show two sets of parameter estimates, which have been estimated as follows:  
+
+* **Full average** Average a particular parameter over all models in the top models set, assuming a zero value for the parameter in models where it is absent (this serves to 'shrink' the parameter estimate back towards zero, which is useful in ameliorating model selection bias). Also called 'unconditional' average.  
+* **Conditional average** Average a particular parameter over only those models in which it appears (the 'natural' average).  
+
+In other words, the 'full' coefficients set terms to 0 if they are not included in the model while averaging, whereas the 'conditional' coefficients ignores the predictors entirely. The 'full' coefficients are thus more conservative.   
+
+The 'full' method is useful if you're more interested in *which* parameters are having an effect. The 'conditional' (or natural average) method is useful if you're more interested in effect sizes (I'm still looking for the ref for this). In this example, the conclusions will be the same from either method. We'll use the conditional coefficients as I'm interested in effect sizes.  
+
+```{r Model-average}
+modavg <- model.avg(topmods)
+summary(modavg)
+```
+
+### 5.2 Quantify model selection uncertainty and incorporate this into estimates of precision 
+If several other independent data sets were collected, would the same top model set be selected? Very possibly not. This model selection uncertainty must be included in measures of precision of parameter estimates and is included in the 'adjusted SE' (aka unconditional SE) values given in the output (see above).  
+
+### 5.3 Work out the relative importance of predictor variables.  
+To calculate the relative variable importance ($w$~*$i$$p$*~) you simply sum the Akaike weights ($w$~*$i$*~) of the models in which the parameter appears.
+
+For example, *treatment* (parameter 2) appears in all models in the top model set. You therefore add the Akaike weights of all models (`r round(Weights(modavg)[1],2)` + `r round(Weights(modavg)[2],2)` + `r round(Weights(modavg)[3],2)` + `r round(Weights(modavg)[4],2)`) to give $w$~*$i$$p$*~ = 1 for *treatment*.  
+The *Interaction* term (parameter 4) only appears in models two and four, which have $w$~*$i$$p$*~ = `r round(Weights(modavg)[2],4)` and $w$~*$i$$p$*~ = `r round(Weights(modavg)[4],4)`. The relative importance ($w$~*$i$$p$*~) of the *interaction* between treatment and land use is therefore just (`r round(Weights(modavg)[2],4)` + `r round(Weights(modavg)[4],4)` (i.e. not important).  
+
+The *MuMIn* package does this for you:
+```{r Get-relative-variable-importance}
+sw(modavg)
+```
+
+### 5.4 Calculate confidence intervals:
+```{r CIs}
+confint(modavg,level = 0.95)
+```
+  
+When reporting your findings, talk about 'strength of evidence'. Avoid using the word 'significant' as we haven't done hypothesis testing and haven't used $p$ values. These have no place in this method. **Do** give estimates of effect size and associated precision.
+
+# 6. Create a table of results
+You can present results in other ways, too, but this table gives all the important information and looks neat!
+```{r Make-results-table, echo=FALSE, message=FALSE, warning = FALSE, results='hide'}
+#length(coef(modavg)) # 8: intercept and 7 variables
+
+# extract top models and their parameters from top.mod.params
+# 'modset' is the output from dredge (i.e. the full model set)
+# 'topmods' is the model set resulting from your specified cut-off
+top.mod.params  <- data.frame(modset[1:(length(topmods)) ,]) %>%
+  #dplyr::select(where(~ !all(is.na(.)))) # needs most up-to-date version of dplyr
+  dplyr::select(which(colSums(!is.na(.)) > 0)) # remove any columns (parameters) containing NA (i.e., no estimates for them in any of the top models)
+
+
+# extract parameter estimates and change parameter estimates to a bullet point to show which parameters are in which model
+# 'modavg' is the output from model averaging
+modvars <- top.mod.params[ ,1:(1+length(sw(modavg))) ]
+modvars <- data.frame(t(modvars)) # transpose
+colnames(modvars) <- as.character(1:length(topmods)) # set column names to the model rank
+modvars <- tibble::rownames_to_column(modvars, "Parameter") # convert rownames to a column and name it Parameter
+modvars <- modvars %>% mutate_if(is.numeric, funs(ifelse(!is.na(.), "\u2022", ""))) # replace estimated values with bullet symbol
+
+# add model averaged estimates and std error to the results table
+# first get model averaged estimates and std errors
+rm(results)
+results <- data.frame(coefTable(modavg))
+results <- tibble::rownames_to_column(results, "Parameter") # convert rownames to a column called 'Parameter'
+results <- dplyr::select(results, -df) # drop the last column, which is empty
+results[,2:3] <- round(data.frame(results[,2:3]),3) # round estimates to 3 dec pl
+
+# join modvars and results
+# NB Parameter values are not exactly matched: change the intercept and any interaction terms so that text matches in both dfs
+modvars$Parameter <- gsub('X.Intercept.','(Intercept)', modvars$Parameter)
+modvars$Parameter <- gsub('\\.c',':c', modvars$Parameter)
+
+# join the two dfs
+results <- dplyr::left_join(results, modvars, "Parameter") %>% 
+  relocate(c(Estimate,Std..Error), .after = last_col()) # move the avgd parameter estimates and std errors to the end
+
+# create table of CIs to add into results table
+ci <- round(data.frame(confint(modavg,level = 0.95)),3)  
+ci <- tibble::rownames_to_column(ci, "Parameter")
+ci$X2.5.. <- formatC(as.numeric(ci$X2.5..),format='f',digits=3,flag='0') # convert to character and retain trailing zeros
+ci$X97.5.. <- formatC(as.numeric(ci$X97.5..),format='f',digits=3,flag='0') # convert to character and retain trailing zeros
+
+# rename variables and create concatenated 95% CI column
+ci <- ci %>% 
+  dplyr::rename(
+    LCI = X2.5..,
+    UCI = X97.5..
+    ) %>% 
+  dplyr::mutate(`95%CI` = paste(LCI, UCI, sep = ", "),.keep = "unused")
+
+ci$`95%CI` <- with(ci, paste0("(", `95%CI`, ")")) # add brackets round the CIs
+results <- dplyr::left_join(results, ci, "Parameter") # add the 95%CIs into the results table
+
+# add relative variable importances (wip) as another column
+varimp <- data.frame(sw(modavg)) # OR: sw(modavg) gives per variable sum of model weights - i.e. rel var importance
+varimp <- tibble::rownames_to_column(varimp, "Parameter") # convert rownames to a column called 'Parameter'
+varimp$`sw.modavg.` <- round(varimp$`sw.modavg.`,2) # round wip to 2 dec pl
+colnames(varimp)[2] <- "wip"
+results <- dplyr::left_join(results, varimp, "Parameter") # add the wip into the results table
+
+# add df, logLik, AICc, delta AICc and weight to results table
+# first extract goodness of fit data from the top model parameters
+modgof <- top.mod.params[ ,which(colnames(top.mod.params)=="df"):which(colnames(top.mod.params)=="weight") ]
+modgof$logLik <- formatC(as.numeric(modgof$logLik),format='f',digits=2,flag='0') # convert to character and retain trailing zeros
+modgof$AICc <- formatC(as.numeric(modgof$AICc),format='f',digits=2,flag='0') # convert to character and retain trailing zeros
+modgof$delta <- formatC(as.numeric(modgof$delta),format='f',digits=2,flag='0') # convert to character and retain trailing zeros
+modgof$weight <- formatC(as.numeric(modgof$weight),format='f',digits=2,flag='0') # convert to character and retain trailing zeros
+modgof <- data.frame(t(modgof)) # transpose
+colnames(modgof) <- as.character(1:length(topmods))
+
+# add 4 more (empty) columns on to match dataframe 'results'
+modgof <- modgof %>%
+  dplyr::mutate(
+    Estimate = NA,
+    Std..Error = NA,
+    `95%CI` = NA,
+    wip = NA)
+
+  # add_column(Estimate = NA,
+  #            Std..Error = NA,
+  #            `95%CI` = NA,
+  #            wip = NA)
+
+modgof <- tibble::rownames_to_column(modgof, "Parameter") # convert rownames to a column and name it Parameter
+results <- rbind(results, modgof) # join the goodness of fit coefs onto the bottom of the results table
+
+# some cells in the results table need to be blank.
+# first convert relevant columns to character and retain trailing zeros first:
+results$Estimate <- formatC(as.numeric(results$Estimate),format='f',digits=3,flag='0') 
+results$Std..Error <- formatC(as.numeric(results$Std..Error),format='f',digits=3,flag='0') 
+results$wip <- formatC(as.numeric(results$wip),format='f',digits=2,flag='0') 
+# now index the cells which need to be blank, and set them to blank:
+results[which(results=="df"):which(results=="weight"),which(colnames(results)=="Estimate"):which(colnames(results)=="wip")] <- ""
+
+# improve column names and remove c. and z. and the underscore from variable names:
+results <- results %>% rename(
+  "\u03B2" = Estimate,
+  SE = Std..Error
+  ) %>% 
+  mutate(
+    Parameter = gsub("c\\.", "", Parameter)) %>% 
+  mutate(
+    Parameter = gsub("z\\.", "", Parameter)) %>% 
+  #mutate(
+    #Parameter = gsub("\\_", "", Parameter)) 
+  mutate(
+    Parameter = gsub("bound_area", "boundary area", Parameter))
+
+results
+
+#clean up
+rm(top.mod.params)
+rm(modvars)
+rm(ci)
+rm(varimp)
+rm(modgof)
+```
+
+
+
+```{r}
+# 1. Extract top model parameters and remove columns with all NAs
+top.mod.params <- modset[1:length(topmods), ] %>%
+  as.data.frame() %>%
+  # remove columns (parameters) containing NA (i.e., no estimates for them in any of the top models)
+  #dplyr::select(where(~ !all(is.na(.)))) # needs most up-to-date version of dplyr
+  dplyr::select(which(colSums(!is.na(.)) > 0)) 
+
+# 2. Create a table showing which parameters are included in each top model
+modvars <- top.mod.params[, 1:(1 + length(sw(modavg)))] %>%  # Select only parameter columns
+  t() %>%  # Transpose so parameters are rows
+  as.data.frame() %>%
+  rownames_to_column("Parameter") %>%
+  setNames(c("Parameter", as.character(1:length(topmods)))) %>%  # Rename columns to model ranks
+  mutate(across(-Parameter, ~ ifelse(!is.na(.), "\u2022", "")))  # Replace non-NA values with bullet points
+
+# 3. Extract model-averaged estimates and standard errors
+results <- MuMIn::coefTable(modavg) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("Parameter") %>%
+  dplyr::select(-df) %>%  # Drop unused df column
+  dplyr::mutate(across(c("Estimate", "Std. Error"), ~ round(., 3)))  # Round numeric values
+
+# 4. Standardize parameter names for joining
+modvars <- modvars %>%
+  dplyr::mutate(
+    Parameter = gsub("X.Intercept.", "(Intercept)", Parameter),
+    Parameter = gsub("\\.c", ":c", Parameter)
+    )
+
+# 5. Join model structure (bullets) with model-averaged results
+results <- dplyr::left_join(results, modvars, by = "Parameter") %>%
+  dplyr::relocate(c("Estimate", "Std. Error"), .after = last_col())  # Move numeric columns to the end
+
+# 6. Add 95% confidence intervals
+ci <- confint(modavg, level = 0.95) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("Parameter") %>%
+  dplyr::rename(LCI = `2.5 %`, UCI = `97.5 %`) %>%
+  dplyr::mutate(across(c(LCI, UCI), ~ formatC(., format = "f", digits = 3, flag = "0")),
+         `95%CI` = paste0("(", LCI, ", ", UCI, ")")) %>%
+  dplyr::select(Parameter, `95%CI`)
+
+results <- dplyr::left_join(results, ci, by = "Parameter")  # Add CI column to results
+
+# 7. Add relative variable importance (wip)
+varimp <- sw(modavg) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("Parameter") %>%
+  dplyr::rename(wip = ".") %>%
+  dplyr::mutate(wip = formatC(round(wip, 2), format = "f", digits = 2, flag = "0"))
+
+results <- left_join(results, varimp, by = "Parameter")  # Add wip column
+
+# 8. Extract model fit statistics (df, logLik, AICc, delta, weight)
+modgof <- top.mod.params %>%
+  dplyr::select(df:weight) %>%
+  dplyr::mutate(across(everything(), ~ formatC(as.numeric(.), format = "f", digits = 2, flag = "0"))) %>%
+  t() %>%
+  as.data.frame() %>%
+  setNames(as.character(1:length(topmods))) %>%
+  tibble::rownames_to_column("Parameter") %>%
+  dplyr::mutate("Estimate" = NA, "Std. Error" = NA, `95%CI` = NA, wip = NA)  # Add empty columns to match results
+
+# 9. Append model fit statistics to results
+results <- bind_rows(results, modgof)
+
+# 10. Format numeric columns and blank out cells in model fit rows
+results <- results %>%
+  dplyr::mutate(across(c("Estimate", "Std. Error"), ~ formatC(as.numeric(.), format = "f", digits = 3, flag = "0")),
+         wip = formatC(as.numeric(wip), format = "f", digits = 2, flag = "0"))
+
+fit_rows <- which(results$Parameter %in% c("df", "logLik", "AICc", "delta", "weight"))
+results[fit_rows, which(names(results) %in% c("Estimate", "Std. Error", "95%CI", "wip"))] <- ""
+
+# 11. Final cleanup of parameter names and column labels
+results <- results %>%
+  dplyr::rename("β" = "Estimate", SE = "Std. Error") %>%
+  dplyr::mutate(
+    Parameter = gsub("c\\.", "", Parameter),
+    Parameter = gsub("z\\.", "", Parameter),
+    Parameter = gsub("bound_area", "boundary area", Parameter))
+
+# 12. Clean up environment
+rm(top.mod.params, ci, varimp, modgof)
+```
+
+```{r Make-pretty-results-table, echo=FALSE, message=FALSE, warning = FALSE, }
+mod_nb <- length(topmods)
+par_nb <- nrow(modvars)
+
+kable(results, booktabs = TRUE, align = c('l', rep('c', mod_nb), rep('r', 4))) %>%
+  kable_classic(full_width = FALSE, position = "left", html_font = "Arial") %>%
+  add_header_above(c(" " = 1, "Model rank" = mod_nb, "Model averaged coefficients" = 4)) %>%
+  column_spec(2:(mod_nb + 1), width = "1.7cm") %>%
+  column_spec((mod_nb + 2):(mod_nb + 3), width = "1.5cm") %>%
+  column_spec(mod_nb + 4, width = "3cm") %>%
+  column_spec(mod_nb + 5, width = "1.3cm") %>%
+  row_spec(par_nb, extra_css = "border-bottom: 1px dotted") %>%
+  row_spec(0, extra_css = "border-bottom: 1px solid")
+```
+Key: $\beta$, averaged parameter estimate; $w$<sub>$ip$</sub>, relative variable importance; SE, adjusted standard error; df, degrees of freedom; delta, change in AICc from top model; weight, Akaike weight.
+
+Now, how could we have done that without R?!!
+
+&nbsp; 
+
+Useful refs:  
+[Burnham & Anderson 2002](https://www.springer.com/gp/book/9780387953649)  
+[Symonds & Moussalli 2011](https://link.springer.com/article/10.1007/s00265-010-1037-6)  
+[Harrison et al 2018](https://peerj.com/articles/4794/)  
+[Burnham et al 2011](https://link.springer.com/article/10.1007/s00265-010-1029-6)  
+[Dormann et al 2018](https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/ecm.1309)    
+
+
