@@ -24,7 +24,7 @@ We’re aiming for the data-based selection of a set of best models. In other wo
 
 **Why model averaging?** The benefit of using multiple models is that they can be ranked and scaled to show model uncertainty over the set. *All* models are then used for inference. "If one has a large number of closely related models, such as in linear-regression based variable selection .... designation of a single best model is unsatisfactory because that 'best' model is often highly variable. That is, the model estimated to be best would vary from data set to data set, where replicate data sets would be collected under the same underlying process. In this situation, model averaging provides a relatively much more stabilized inference." (p.151, Burnham & Anderson 2002).
 
-IT-based MMI is good for:  
+**IT-based MMI is particularly good for:** 
 
 * observational data 
 *	data with lots of potential predictor variables  
@@ -122,13 +122,6 @@ abundance_data <- read.csv(here::here("data", "solitary_bees_clean.csv"), header
       treatment == "MC" & site == "WAF" ~ rpois(n(), lambda = 19),
       treatment == "MC" & site == "WH" ~ rpois(n(), lambda = 16),      
       TRUE ~ rpois(n(), lambda = 8)  # default fallback
-    #),
-    # bee_abundance = case_when(
-    #   treatment == "AF" & site == "WAF" ~ rpois(n(), lambda = 22),
-    #   treatment == "AF" & site == "EAF" ~ rpois(n(), lambda = 18),
-    #   treatment == "MC" & site == "WAF" ~ rpois(n(), lambda = 16),
-    #   treatment == "MC" & site == "EAF" ~ rpois(n(), lambda = 13),
-    #   TRUE ~ rpois(n(), lambda = 15)
     )
   )
 
@@ -163,8 +156,9 @@ abundance_data %>%
   summarise(fields = paste(unique(field), collapse = ", ")) %>%
   arrange(site)
 ```
-You can see that at some sites, both treatments were in the same field (e.g., CE & RR). At other sites, the treatments were in different fields in different years (e.g., SD, WH).    
-This is a typical ecological dataset. There are lots of other variables that might be affecting insect abundances, and some sites sampled more often than others, although thankfully each treatment is sampled equally within sites. We're not going to focus on the sampling details here, but when using your own data you would of course need to think about how to account for  hierarchical designs, unequal sampling, lots of zeros in your data, etc. when considering your approach and model specification. The aim for this session is just to show you the mechanics of multi-model inference, which is particularly useful for datasets where there are lots of potentially influential variables.  
+You can see that at some sites, both treatments were in the same field (e.g., at CE & RR, where there is only one field at each site). At other sites, the treatments were in different fields in different years (e.g., SD, WH).   
+  
+This is a typical ecological dataset: there are lots of other variables apart from treatment that might be affecting butterfly abundance, and some sites were sampled more often than others (although thankfully each treatment is sampled equally within sites). We're not going to focus on the sampling details here, but when using your own data you would of course need to think about how to account for  hierarchical designs, unequal sampling, lots of zeros in your data, etc. when considering your approach and model specification. The aim for this session is just to show you the mechanics of multi-model inference, which is particularly useful for datasets where there are lots of potentially influential variables.  
 &nbsp; 
 
 # Model
@@ -183,8 +177,8 @@ gm_notrescaled <- glmer(butterfly_abundance ~ treatment + landuse + bound_area +
                        )
 ```
 
-We get a warning about the predictor variables being on different scales. We need to rescale them.  
-
+We get several warnings, one of which warns about the predictor variables being on different scales. We need to rescale them.  
+  
 ## 2. Rescale variables
 You can do this in several ways (the method you choose _may_ give you different parameter estimates):
 
@@ -211,13 +205,13 @@ qqline(resid(gm))
 hist(residuals(gm))
 ```
 
-This will do for now - we're not concerned with model fit here as it's fake data anyway, we just want to learn the steps. However, we will check for overdispersion as we've used a Poisson error distribution.  
+This will do for now - we're not concerned with model fit here as it's fake data anyway, we just want to learn the steps. However, we will check for overdispersion as we've used a Poisson error distribution (it won't be a problem here as we generated the data, but with your own data you should always check!).  
 ```{r}
 library(performance)
 check_overdispersion(gm)
 ```
 Once you are happy that your global model fits and doesn't violate any assumptions, you can go ahead with creating models for alternative hypotheses.  
-
+  
 ## 4. Generate all possible lower-dimensional sub-models
 
 ...in effect, all possible hypotheses.  
@@ -238,7 +232,7 @@ The Akaike weight ($w$~*$i$*~) indicates the relative likelihood of a model, *gi
 In the output above, we can see that the 'best' model in the set is not convincingly the best model: the evidence ratio for model 3 versus model 68 is only 1.1 (i.e., $w$~0.238~ / $w$~0.213~ = 1.117). This weak support for the 'best' model suggests that we would expect to see a lot of variation in the selected best model from sample to sample if we could draw multiple independent samples; in other words, the data-based model selection uncertainty is likely to be high. This indicates that these data are inadequate to reach strong inference so we should definitely use model averaging to make more robust inference (MMI).   
 &nbsp; 
 
-## 4. Create a 'top models' set
+## 5. Create a 'top models' set
 
 By comparing these models against each other to find their relative worth, we can refine the model set created in step 3 above, retaining just those models for which there is good empirical support. In this way we create a smaller set of candidate models to use for inference.  
 
@@ -257,11 +251,11 @@ length(topmods)
 
 &nbsp; 
 
-## 5. Use the top models set for inference  
+## 6. Use the top models set for inference  
 
 There are four stages to this, the first two of which are done for you by the function *model.avg*:  
 
-### 5.1 Make parameter estimates averaged across the top model set 
+### 6.1 Make parameter estimates averaged across the top model set 
 The function *model.avg* computes weighted estimates of the predicted values, weighting the predictions by the Akaike weights. The model output will show two sets of parameter estimates, which have been estimated as follows:  
 
 * **Full average** Average a particular parameter over all models in the top models set, assuming a zero value for the parameter in models where it is absent (this serves to 'shrink' the parameter estimate back towards zero, which is useful in ameliorating model selection bias). Also called 'unconditional' average.  
@@ -276,28 +270,31 @@ modavg <- model.avg(topmods)
 summary(modavg)
 ```
 
-### 5.2 Quantify model selection uncertainty and incorporate this into estimates of precision 
+### 6.2 Quantify model selection uncertainty and incorporate this into estimates of precision 
 If several other independent data sets were collected, would the same top model set be selected? Very possibly not. This model selection uncertainty must be included in measures of precision of parameter estimates and is included in the 'adjusted SE' (aka unconditional SE) values given in the output (see above).  
 
-### 5.3 Work out the relative importance of predictor variables.  
+### 6.3 Work out the relative importance of predictor variables.  
 To calculate the relative variable importance ($w$~*$i$$p$*~) you simply sum the Akaike weights ($w$~*$i$*~) of the models in which the parameter appears.
 
-For example, *treatment* (parameter 2) appears in all models in the top model set. You therefore add the Akaike weights of all models (`r round(Weights(modavg)[1],2)` + `r round(Weights(modavg)[2],2)` + `r round(Weights(modavg)[3],2)` + `r round(Weights(modavg)[4],2)`) to give $w$~*$i$$p$*~ = 1 for *treatment*.  
-The *Interaction* term (parameter 4) only appears in models two and four, which have $w$~*$i$$p$*~ = `r round(Weights(modavg)[2],4)` and $w$~*$i$$p$*~ = `r round(Weights(modavg)[4],4)`. The relative importance ($w$~*$i$$p$*~) of the *interaction* between treatment and land use is therefore just (`r round(Weights(modavg)[2],4)` + `r round(Weights(modavg)[4],4)` (i.e. not important).  
-
+For example, *treatment* (parameter 2) appears in all models in the top model set. You therefore add the Akaike weights of all models (`r round(Weights(modavg)[1],2)` + `r round(Weights(modavg)[2],2)` + `r round(Weights(modavg)[3],2)` + `r round(Weights(modavg)[4],2)` + `r round(Weights(modavg)[5],2)` + `r round(Weights(modavg)[6],2)`) to give $w$~*$i$$p$*~ = 1 for *treatment*.  
+  
+The *interaction* term (parameter 4) only appears in models two and four, which have $w$~*$i$$p$*~ = `r round(Weights(modavg)[2],4)` and $w$~*$i$$p$*~ = `r round(Weights(modavg)[4],4)`. The relative importance ($w$~*$i$$p$*~) of the *interaction* between treatment and land use is therefore just `r round(Weights(modavg)[2],4)` + `r round(Weights(modavg)[4],4)` = 0.35 (i.e. not important).
+  
 The *MuMIn* package does this for you:
 ```{r Get-relative-variable-importance}
 sw(modavg)
 ```
-
-### 5.4 Calculate confidence intervals:
+  
+The answers here are more accurate (when doing it by hand we used rounded values from the model summary).  
+  
+### 6.4 Calculate confidence intervals:
 ```{r CIs}
 confint(modavg,level = 0.95)
 ```
   
 When reporting your findings, talk about 'strength of evidence'. Avoid using the word 'significant' as we haven't done hypothesis testing and haven't used $p$ values. These have no place in this method. **Do** give estimates of effect size and associated precision.
 
-# 6. Create a table of results
+# 7. Create a table of results
 You can present results in other ways, too, but this table gives all the important information and looks neat!
 ```{r Make-results-table, echo=FALSE, message=FALSE, warning = FALSE, results='hide'}
 #length(coef(modavg)) # 8: intercept and 7 variables
@@ -523,10 +520,12 @@ kable(results, booktabs = TRUE, align = c('l', rep('c', mod_nb), rep('r', 4))) %
 Key: $\beta$, averaged parameter estimate; $w$<sub>$ip$</sub>, relative variable importance; SE, adjusted standard error; df, degrees of freedom; delta, change in AICc from top model; weight, Akaike weight.
 
 Now, how could we have done that without R?!!
+  
+**Your final task** is to write a sentence or two explaining what the results tell us. Is treatment important? Are any other variables important? How can you tell?  
 
 &nbsp; 
 
-Useful refs:  
+# 8. Useful references  
 [Burnham & Anderson 2002](https://www.springer.com/gp/book/9780387953649)  
 [Symonds & Moussalli 2011](https://link.springer.com/article/10.1007/s00265-010-1037-6)  
 [Harrison et al 2018](https://peerj.com/articles/4794/)  
