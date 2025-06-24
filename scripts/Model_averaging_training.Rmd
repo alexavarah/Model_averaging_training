@@ -1,7 +1,7 @@
 ---
 title: "IT-based model averaging"
 author: "Alexa Varah"
-date: "05/01/2021"
+date: "24/06/2025"
 output:
   html_document: default
   pdf_document: default
@@ -44,24 +44,25 @@ Although IT-based MMI is not completely free of the disadvantages of stepwise me
 The process involves _a priori_ model specification, then model selection, and finally estimation of parameters and their precision.  
 &nbsp; 
 
-We'll assume that we've identified possible predictor variables through a literature search. *N.B.* This should be done _before_ you even do fieldwork! Once you've collected data you can do some basic data exploration (but NO data dredging or modelling!).  
+So, we'll assume that we've identified possible predictor variables through a literature search. **N.B.** This should be done _before_ you even do fieldwork! Once you've collected data you can do some basic data exploration (but NO data dredging or modelling!).  
 
-We'll now load the dataset and get modelling.
+We'll now load packages and the dataset and get modelling.
 
 
 # Load packages
 
 ```{r Load-packages, message=FALSE}
 rm(list=ls())
-library(dplyr) # for easy data manipulation (includes packages dplyr, tidyr, stringr, ggplot2, purr, tibble, readr, forcats)
-library(tibble)
-library(stringr)
+library(dplyr) # for easy data manipulation
+library(tibble) # for easy data manipulation
+#library(stringr) # for dealing with strings
 library(MASS) # for stats
 library(lme4) # for mixed effects models
 library(arm) # for standardizing variables
 library(MuMIn) # for multi-model inference
 library(knitr)
-library(kableExtra) # for working with tables
+library(kableExtra) # for pretty tables
+library(here) # for a more robust & reproducible approach than relative paths
 ```
 
 
@@ -75,7 +76,7 @@ Load and tidy the data and generate fake abundances.
 # Set seed for reproducibility
 set.seed(123)
 
-abundance_data <- read.csv('../data/solitary_bees_clean.csv', header = TRUE) %>% 
+abundance_data <- read.csv(here::here("data", "solitary_bees_clean.csv"), header = TRUE) %>% 
   dplyr::mutate(
     date = trimws(date),  # remove any leading/trailing whitespace
     date = as.Date(date, format = "%Y-%m-%d"), # ensure date is formatted correctly
@@ -157,75 +158,13 @@ table(abundance_data$site, abundance_data$month, abundance_data$year)
 
 Let's look at how many fields were in each site.
 ```{r}
-table(abundance_data$site, abundance_data$field)
+abundance_data %>%
+  group_by(site) %>%
+  summarise(fields = paste(unique(field), collapse = ", ")) %>%
+  arrange(site)
 ```
 You can see that at some sites, both treatments were in the same field (e.g., CE & RR). At other sites, the treatments were in different fields in different years (e.g., SD, WH).    
 This is a typical ecological dataset. There are lots of other variables that might be affecting insect abundances, and some sites sampled more often than others, although thankfully each treatment is sampled equally within sites. We're not going to focus on the sampling details here, but when using your own data you would of course need to think about how to account for  hierarchical designs, unequal sampling, lots of zeros in your data, etc. when considering your approach and model specification. The aim for this session is just to show you the mechanics of multi-model inference, which is particularly useful for datasets where there are lots of potentially influential variables.  
-
-
-
-```{r Load-and-prep-data, echo=FALSE, message=FALSE, warning = FALSE, results='hide'}
-workingdir = "C:/Users/alexv2/OneDrive - Natural History Museum/PhD/PhD manuscripts/Biodiversity"
-setwd(workingdir) # output will go into pollination folder
-
-transect = read_xlsx("C:/Users/alexv2/OneDrive - Natural History Museum/PhD/data/Transect data_master.xlsx",2)
-
-lep = subset(transect, select=c(site:butact,LEPIDOPTERA)) %>% # extract just the columns relevant to bumblebee analyses
-  rename(butt=LEPIDOPTERA)  %>% 
-  mutate(
-    site = factor(site),
-    site = recode(site, "seh" = "waf"),
-    site = recode(site, "mc" = "ce"),
-    visit = factor(visit),
-    year = factor(year),
-    date = as.Date(paste(day, month, year, sep="-"), "%d-%m-%Y"), # concatenate day, month, year to create date
-    monthtxt = month.abb[month],
-    yrmth = paste(year, month, sep="-"), # create a new vector of month-year
-    jdate = difftime(date, as.Date(paste(01, 03, year, sep="-"),"%d-%m-%Y"), units = c("days")), # calc days since 1st March. 
-    landuse = factor(landuse),
-    treatment = factor(treatment),
-    field = factor(field),
-    bound.area = as.numeric(bound.area),
-    n.hedg.bound = as.numeric(n.hedg.bound),
-    snh = as.numeric(snh),
-    starttime = times(strftime(start,"%H:%M:%S")), # convert to just time (removes date, which was wrong date anyway)
-    endtime = times(strftime(end,"%H:%M:%S")), # convert to just time (removes date, which was wrong date anyway)
-    windfac = factor(wind),
-    wind3 = factor(1+(windfac=="2")+2*(windfac=="3")+2*(windfac=="4")), # get rid of the one value of 4 in windstrength
-    butt = as.numeric(butt) 
-  )  %>% 
-  filter(!( (year == '2011' & site == 'waf' ) )) %>% # Filter out WAF 2011
-  filter(!is.na(butt))  %>% # remove rows where there is an NA in butterfly column  
-  subset( select = -c(start, end)) %>% # drop these columns
-  droplevels() %>% # get rid of any unused levels, i.e. SEH
-  
-  # Rescale some of the variables that are on very different scales. Here we rescale them to values between 0 and 1
-  # (they need to be numeric before we can rescale them)
-  mutate_at('jdate',as.numeric) %>% 
-  mutate(resc.bound.area = (bound.area - min(bound.area)) / ( max(bound.area) - min(bound.area) ),
-         resc.alleylength = (alleylength - min(alleylength)) / ( max(alleylength) - min(alleylength) ),
-         resc.sun = (sun - min(sun)) / ( max(sun) - min(sun) ),
-         resc.hedg.dist = (hedg.dist - min(hedg.dist)) / ( max(hedg.dist) - min(hedg.dist) ),
-         resc.jdate = (jdate - min(jdate)) / ( max(jdate) - min(jdate) )
-         ) %>%
-  mutate(ID = paste(site, treatment, visit, sep = '-') )  %>% # make site-treatment-visit identifier
-  group_by(ID) %>% # grouping factor for sum
-  mutate(butt_total = sum(butt)) %>% # sum butterfly counts per site-treatment-visit combo
-  distinct(ID, .keep_all = TRUE) %>% # keep only one row per ID
-  droplevels() %>% # drop empty factor levels i.e. SEH
-  # pull out the columns we want to keep (N.B. dplyr 'select' can clash with MASS so use 'dplyr::select' to ensure we're using 'select' from dplyr)
-  dplyr::select("ID", "site", "visit", "treatment", "landuse", "yrmth", "year", "month", "monthtxt", "date", 
-                "butt_total", "boundSR.all", "boundSR.ip", "n.hedg.bound", "snh", "sun", "resc.sun", "hedg.dist", "resc.hedg.dist", 
-                "bound.area", "resc.bound.area", "jdate", "resc.jdate", "wind3") %>% 
-  droplevels()  %>%
-  arrange(site, visit, treatment) # sort data
-
-# add in system age
-site <- c('wh','sd','waf', 'rr', 'ce', 'lhf')
-age <- c(2,9,14,24,24,18)
-df <- data.frame (site, age)
-lep <- merge(lep, df, by="site")
-```
 &nbsp; 
 
 # Model
