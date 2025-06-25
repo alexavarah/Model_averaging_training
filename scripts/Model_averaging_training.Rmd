@@ -225,7 +225,7 @@ modset <- dredge(gm, rank = "AICc") # AICc is the default so 'rank =' is obsolet
 head(modset, n=10)
 ```
 
-The output shows the top 6 models of all the possible sub-models, ranked by AIC~*c*~.  
+The output shows the top 10 models of all the possible sub-models, ranked by AIC~*c*~.  
 Column 1 is the model number in the set of generated sub-models. Column 2 is the estimated intercept. The following columns give the variables that are present in these models: where a variable is present in a model, the parameter estimate is given. Next are the degrees of freedom, the log likelihood ('logLik'), AIC~*c*~, the change in AIC~*c*~ ('delta'), and the Akaike weight ('weight').  
 The Akaike weight ($w$~*$i$*~) indicates the relative likelihood of a model, *given the data and the set of models*. Akaike weights are computed by normalising the likelihood values, and provide a way of scaling and interpreting the changes in AIC~*c*~ values. Akaike weights of all models in the set add up to 1, so if you add or remove a model from the set you need to recompute $w$~*$i$*~ for all the models in the new set. Unless the top model has $w$~*$i$*~ $\ge$ 0.9, you should use model averaging.
 
@@ -296,126 +296,6 @@ When reporting your findings, talk about 'strength of evidence'. Avoid using the
 
 # 7. Create a table of results
 You can present results in other ways, too, but this table gives all the important information and looks neat!
-```{r Make-results-table, echo=FALSE, message=FALSE, warning = FALSE, results='hide'}
-#length(coef(modavg)) # 8: intercept and 7 variables
-
-# extract top models and their parameters from top.mod.params
-# 'modset' is the output from dredge (i.e. the full model set)
-# 'topmods' is the model set resulting from your specified cut-off
-top.mod.params  <- data.frame(modset[1:(length(topmods)) ,]) %>%
-  #dplyr::select(where(~ !all(is.na(.)))) # needs most up-to-date version of dplyr
-  dplyr::select(which(colSums(!is.na(.)) > 0)) # remove any columns (parameters) containing NA (i.e., no estimates for them in any of the top models)
-
-
-# extract parameter estimates and change parameter estimates to a bullet point to show which parameters are in which model
-# 'modavg' is the output from model averaging
-modvars <- top.mod.params[ ,1:(1+length(sw(modavg))) ]
-modvars <- data.frame(t(modvars)) # transpose
-colnames(modvars) <- as.character(1:length(topmods)) # set column names to the model rank
-modvars <- tibble::rownames_to_column(modvars, "Parameter") # convert rownames to a column and name it Parameter
-modvars <- modvars %>% mutate_if(is.numeric, funs(ifelse(!is.na(.), "\u2022", ""))) # replace estimated values with bullet symbol
-
-# add model averaged estimates and std error to the results table
-# first get model averaged estimates and std errors
-rm(results)
-results <- data.frame(coefTable(modavg))
-results <- tibble::rownames_to_column(results, "Parameter") # convert rownames to a column called 'Parameter'
-results <- dplyr::select(results, -df) # drop the last column, which is empty
-results[,2:3] <- round(data.frame(results[,2:3]),3) # round estimates to 3 dec pl
-
-# join modvars and results
-# NB Parameter values are not exactly matched: change the intercept and any interaction terms so that text matches in both dfs
-modvars$Parameter <- gsub('X.Intercept.','(Intercept)', modvars$Parameter)
-modvars$Parameter <- gsub('\\.c',':c', modvars$Parameter)
-
-# join the two dfs
-results <- dplyr::left_join(results, modvars, "Parameter") %>% 
-  relocate(c(Estimate,Std..Error), .after = last_col()) # move the avgd parameter estimates and std errors to the end
-
-# create table of CIs to add into results table
-ci <- round(data.frame(confint(modavg,level = 0.95)),3)  
-ci <- tibble::rownames_to_column(ci, "Parameter")
-ci$X2.5.. <- formatC(as.numeric(ci$X2.5..),format='f',digits=3,flag='0') # convert to character and retain trailing zeros
-ci$X97.5.. <- formatC(as.numeric(ci$X97.5..),format='f',digits=3,flag='0') # convert to character and retain trailing zeros
-
-# rename variables and create concatenated 95% CI column
-ci <- ci %>% 
-  dplyr::rename(
-    LCI = X2.5..,
-    UCI = X97.5..
-    ) %>% 
-  dplyr::mutate(`95%CI` = paste(LCI, UCI, sep = ", "),.keep = "unused")
-
-ci$`95%CI` <- with(ci, paste0("(", `95%CI`, ")")) # add brackets round the CIs
-results <- dplyr::left_join(results, ci, "Parameter") # add the 95%CIs into the results table
-
-# add relative variable importances (wip) as another column
-varimp <- data.frame(sw(modavg)) # OR: sw(modavg) gives per variable sum of model weights - i.e. rel var importance
-varimp <- tibble::rownames_to_column(varimp, "Parameter") # convert rownames to a column called 'Parameter'
-varimp$`sw.modavg.` <- round(varimp$`sw.modavg.`,2) # round wip to 2 dec pl
-colnames(varimp)[2] <- "wip"
-results <- dplyr::left_join(results, varimp, "Parameter") # add the wip into the results table
-
-# add df, logLik, AICc, delta AICc and weight to results table
-# first extract goodness of fit data from the top model parameters
-modgof <- top.mod.params[ ,which(colnames(top.mod.params)=="df"):which(colnames(top.mod.params)=="weight") ]
-modgof$logLik <- formatC(as.numeric(modgof$logLik),format='f',digits=2,flag='0') # convert to character and retain trailing zeros
-modgof$AICc <- formatC(as.numeric(modgof$AICc),format='f',digits=2,flag='0') # convert to character and retain trailing zeros
-modgof$delta <- formatC(as.numeric(modgof$delta),format='f',digits=2,flag='0') # convert to character and retain trailing zeros
-modgof$weight <- formatC(as.numeric(modgof$weight),format='f',digits=2,flag='0') # convert to character and retain trailing zeros
-modgof <- data.frame(t(modgof)) # transpose
-colnames(modgof) <- as.character(1:length(topmods))
-
-# add 4 more (empty) columns on to match dataframe 'results'
-modgof <- modgof %>%
-  dplyr::mutate(
-    Estimate = NA,
-    Std..Error = NA,
-    `95%CI` = NA,
-    wip = NA)
-
-  # add_column(Estimate = NA,
-  #            Std..Error = NA,
-  #            `95%CI` = NA,
-  #            wip = NA)
-
-modgof <- tibble::rownames_to_column(modgof, "Parameter") # convert rownames to a column and name it Parameter
-results <- rbind(results, modgof) # join the goodness of fit coefs onto the bottom of the results table
-
-# some cells in the results table need to be blank.
-# first convert relevant columns to character and retain trailing zeros first:
-results$Estimate <- formatC(as.numeric(results$Estimate),format='f',digits=3,flag='0') 
-results$Std..Error <- formatC(as.numeric(results$Std..Error),format='f',digits=3,flag='0') 
-results$wip <- formatC(as.numeric(results$wip),format='f',digits=2,flag='0') 
-# now index the cells which need to be blank, and set them to blank:
-results[which(results=="df"):which(results=="weight"),which(colnames(results)=="Estimate"):which(colnames(results)=="wip")] <- ""
-
-# improve column names and remove c. and z. and the underscore from variable names:
-results <- results %>% rename(
-  "\u03B2" = Estimate,
-  SE = Std..Error
-  ) %>% 
-  mutate(
-    Parameter = gsub("c\\.", "", Parameter)) %>% 
-  mutate(
-    Parameter = gsub("z\\.", "", Parameter)) %>% 
-  #mutate(
-    #Parameter = gsub("\\_", "", Parameter)) 
-  mutate(
-    Parameter = gsub("bound_area", "boundary area", Parameter))
-
-results
-
-#clean up
-rm(top.mod.params)
-rm(modvars)
-rm(ci)
-rm(varimp)
-rm(modgof)
-```
-
-
-
 ```{r}
 # 1. Extract top model parameters and remove columns with all NAs
 top.mod.params <- modset[1:length(topmods), ] %>%
