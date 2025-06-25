@@ -402,6 +402,7 @@ Key: $\beta$, averaged parameter estimate; $w$<sub>$ip$</sub>, relative variable
 Now, how could we have done that without R?!!
   
 **Your final task** is to write a sentence or two explaining what the results tell us. Is treatment important? Are any other variables important? How can you tell?  
+ 
 
 &nbsp; 
 
