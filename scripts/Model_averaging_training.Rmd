@@ -554,14 +554,20 @@ new_data <- new_data %>%
     )
   ) %>% 
   rename(
-    treatment = c.treatment,
-    landuse = c.landuse,
-    `landuse:treatment` = `c.landuse:c.treatment`
+    Treatment = c.treatment,
+    Landuse = c.landuse,
+    `Tmt:Landuse` = `c.landuse:c.treatment`,
+    `Predicted abundance` = predicted_abundance,
+    `Raw boundary area` = bound_area_raw,
+    `Standardised boundary area` = `z.bound_area`
   ) %>% 
   # change column order
-  dplyr::relocate(z.bound_area, .after = bound_area_raw)
+  dplyr::relocate(`Standardised boundary area`, .after = `Raw boundary area`)
 
-print(new_data)
+new_data %>%
+  kable() %>%
+  kable_styling(full_width = FALSE) %>%
+  scroll_box(width = "100%")  # adds horizontal scrolling
 ```
 
 The interaction term represents the unique effect of being in both pasture and agroforestry beyond the additive effects of pasture and agroforestry alone. The coefficient for the interaction term tells you how much the effect of one treatment changes depending on the level of landuse.
@@ -586,6 +592,8 @@ Or, in other words:
 | pasture  | MC        | no                |
 | pasture  | AF        | yes               |
 
+  
+In fact, the interaction is deemed to be an unimportant parameter and it's not making any difference to the predicted abundance here.  
   
 # Useful references  
 [Burnham & Anderson 2002](https://www.springer.com/gp/book/9780387953649)  
