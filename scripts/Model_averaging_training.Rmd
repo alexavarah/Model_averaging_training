@@ -1,7 +1,7 @@
 ---
 title: "IT-based model averaging"
 author: "Alexa Varah"
-date: "24/06/2025"
+date: "23/07/2025"
 output:
   html_document: default
   pdf_document: default
@@ -16,10 +16,48 @@ Information theoretic (IT)-based model averaging allows inferences to be drawn f
 
 # Concept
 
-The data is 'correct'.  
-We’re looking to see which effects (parameters) are supported by the data.  
-We’re aiming for the data-based selection of a set of best models. In other words, we'll examine the likelihood of various models (i.e., various hypotheses about reality), given the data. Inference is based on more than one model.   
 
+* The data is 'correct'.  
+* We’re looking to see which effects (parameters) are supported by the data.  
+* We’re aiming for the data-based selection of a set of best models. In other words, we'll examine the likelihood of various models (i.e., various hypotheses about reality), given the data.  
+* Inference is based on more than one model.   
+  
+Here's the difference between a Frequentist approach and an Information Theoretic approach:
+  
+| Aspect              | Frequentist Approach                                            | Information-Theoretic Approach                                    |
+|:---------------------|:-------------------------------------------------------------------|:-------------------------------------------------------------------|
+| Focus               | Hypothesis testing and inference based on long-run frequencies  | Model selection based on information content and parsimony       |
+| Core Idea           | A single "true" model exists; data are random                   |  There is no single "true" model, but some models approximate reality better than others |
+| Model Perspective   | Evaluate how likely the data are given a specific model         | Compare models based on how well they explain the data, using information loss as a criterion (e.g., AIC)|
+| Probability View    | Probability = long-run frequency*                                | Probability = a measure of information or model fit (via AIC)     |
+  
+*Long-run frequency: If you repeated the experiment infinitely many times, in X% of those, you'd see results this extreme or more by chance.  
+  
+In a frequentist approach you're asking “Is this effect statistically significant?”  
+In an Information Theoretic approach you're asking “Which model best approximates reality?”  
+  
+Here's how you treat models in the two approaches:  
+  
+|                         | Frequentist Approach                                   | Information-Theoretic Approach                           |
+|:-------------------------|:--------------------------------------------------------|:-----------------------------------------------------------|
+| View of Models          | One model is “true”; others are incorrect              | All models are approximations of reality                  |
+| Model Testing           | Typically uses null hypothesis testing (e.g., p-values)| Compares multiple plausible models simultaneously         |
+| Model Fit Evaluation    | p-values, test statistics (e.g., t, F, χ²)             | AIC, AICc, BIC, log-likelihood                            |
+| Selection Strategy      | Stepwise selection (e.g., backward, forward)           | Model ranking based on AIC, considers full model set      |
+| Output Emphasis         | Significance tests, confidence intervals               | Akaike weights, evidence ratios, model averaging          |
+  
+  
+And here's how you treat data in the two approaches:  
+  
+|                       | Frequentist Approach                                     | Information-Theoretic Approach                          |
+|:------------------------|:----------------------------------------------------------|:----------------------------------------------------------|
+| Role of Data           | Used to test hypotheses and estimate parameters         | Used to estimate how well models explain observed data   |
+| Replication View       | Assumes repeated sampling from a population             | Data are fixed; models are evaluated against them        |
+| Probability Perspective| Probability as long-run frequency                       | Probability as a measure of model fit via likelihood     |
+| Significance Thinking  | Emphasizes binary decisions (e.g., p < 0.05)            | Avoids dichotomous thinking; emphasizes model support    |
+| Source of Uncertainty  | From data sampling                                       | From model selection and uncertainty among models        |
+
+  
 **Why information theoretic?** We use existing knowledge to inform _a priori_ the choice of predictor variables in our model (i.e., _before we look at the data_!), rather than using the data to inform our choice of variables. 
 
 **Why model averaging?** The benefit of using multiple models is that they can be ranked and scaled to show model uncertainty over the set. *All* models are then used for inference. "If you have a large number of closely related models, such as in linear-regression based variable selection .... designation of a single best model is unsatisfactory because that 'best' model is often highly variable. That is, the model estimated to be best would vary from data set to data set, where replicate data sets would be collected under the same underlying process. In this situation, model averaging provides a relatively much more stabilized inference." (p.151, Burnham & Anderson 2002).
@@ -44,6 +82,11 @@ Although IT-based MMI is not completely free of the disadvantages of stepwise me
 The process involves _a priori_ model specification, then model selection, and finally estimation of parameters and their precision.  
 &nbsp; 
 
+**A note about p-values**
+Information theoretic approaches do not use p-values. They work on a 'weight of evidence' approach. Here's a quick explainer about why NOT to look at the p-values!  
+Traditional significance testing (i.e. in frequentist statistics) assumes a fixed model, or in other words it assumes there is one 'true' model. In model averaging we blend models, so the sampling distribution of each parameter is not based on a single model’s assumptions - this means that traditional significance testing isn't reliable. Also, standard errors are used in the calculation of p-values but the SEs in model averaged output are not straightforward - they are unconditional SEs (these try to account for model selection uncertainty) which again makes significance testing unreliable. Another point is that if a parameter is not included in many models then its averaged coefficient will be shrunk towards zero - but this doesn't necessarily reflect its 'true' effect size or importance, so you can't rely on the p-value associated with it. So basically, ignore the p-values!!!
+  
+  
 So, we'll assume that we've identified possible predictor variables through a literature search. **N.B.** This should be done _before_ you even do fieldwork! Once you've collected data you can do some basic data exploration (but NO data dredging or modelling!).  
 
 We'll now load packages and the dataset and get modelling.
@@ -249,6 +292,8 @@ The Akaike weight ($w$~*$i$*~) indicates the relative likelihood of a model, *gi
 In the output above, we can see that the 'best' model in the set is not convincingly the best model: the evidence ratio for model 3 versus model 68 is only 1.1 (i.e., model 3 $w$~0.180~ / model 68 $w$~0.161~ = 1.118). This weak support for the 'best' model suggests that we would expect to see a lot of variation in the selected best model from sample to sample if we could draw multiple independent samples; in other words, the data-based model selection uncertainty is likely to be high. This indicates that these data are inadequate to reach strong inference so we should definitely use model averaging to make more robust inference (multi-model inference, or MMI).   
 &nbsp; 
 
+(An aside: note that the interaction we specified, 'treatment:landuse', appears in the model selection table as 'landuse:treatment'. This is just because MuMIn re-labels interaction terms alphabetically. It changes nothing in terms of model fitting, predictions, or interpretation).  
+  
 ## 5. Create a 'top models' set
 
 By comparing these models against each other to find their relative worth, we can refine the model set created in step 4 above, retaining just those models for which there is good empirical support. In this way we create a smaller set of candidate models to use for inference.  
@@ -288,7 +333,12 @@ Make sure to specify `fit = TRUE` in `model.avg()` so that the underlying models
 modavg <- model.avg(topmods, fit = TRUE)
 summary(modavg)
 ```
-
+  
+Because we re-leveled the treatment variable, the intercept is treatment = monoculture, landuse = arable.  
+The interaction term gives the unique effect of being in both pasture and agroforestry beyond the additive effects of pasture and agroforestry alone.  
+ 
+Note that the output gives you unconditional SE ('adjusted SE'), which tries to account for model selection uncertainty. These are the ones to report.  
+ 
 ### 6.2 Quantify model selection uncertainty and incorporate this into estimates of precision 
 If several other independent data sets were collected, would the same top model set be selected? Very possibly not. This model selection uncertainty must be included in measures of precision of parameter estimates: it is automatically included for you in the 'adjusted SE' (aka unconditional SE) values given in the output (see above).  
 
@@ -492,6 +542,8 @@ new_data <- new_data %>%
 print(new_data)
 ```
 
+The interaction term represents the unique effect of being in both pasture and agroforestry beyond the additive effects of pasture and agroforestry alone. The coefficient for the interaction term tells you how much the effect of one treatment changes depending on the level of landuse.
+
 Explanation of the interaction term in this data frame:
 'c.landuse' and 'c.treatment' are both binary variables (0 or 1), so their interaction behaves like this:
 
@@ -506,10 +558,10 @@ Explanation of the interaction term in this data frame:
 Or, in other words:
 | landuse   | treatment | landuse:treatment |
 |:--------:|:---------:|:-----------------:|
-| arable    | AF        |        no         |
 | arable    | MC        |        no         |
-| pasture   | AF        |        no         |
-| pasture   | MC        |        yes        |
+| arable    | AF        |        no         |
+| pasture   | MC        |        no         |
+| pasture   | AF        |        yes        |
 
 
 So when there is a 1 in the interaction column, that means the model is predicting 
