@@ -22,7 +22,7 @@ We’re aiming for the data-based selection of a set of best models. In other wo
 
 **Why information theoretic?** We use existing knowledge to inform _a priori_ the choice of predictor variables in our model (i.e., _before we look at the data_!), rather than using the data to inform our choice of variables. 
 
-**Why model averaging?** The benefit of using multiple models is that they can be ranked and scaled to show model uncertainty over the set. *All* models are then used for inference. "If one has a large number of closely related models, such as in linear-regression based variable selection .... designation of a single best model is unsatisfactory because that 'best' model is often highly variable. That is, the model estimated to be best would vary from data set to data set, where replicate data sets would be collected under the same underlying process. In this situation, model averaging provides a relatively much more stabilized inference." (p.151, Burnham & Anderson 2002).
+**Why model averaging?** The benefit of using multiple models is that they can be ranked and scaled to show model uncertainty over the set. *All* models are then used for inference. "If you have a large number of closely related models, such as in linear-regression based variable selection .... designation of a single best model is unsatisfactory because that 'best' model is often highly variable. That is, the model estimated to be best would vary from data set to data set, where replicate data sets would be collected under the same underlying process. In this situation, model averaging provides a relatively much more stabilized inference." (p.151, Burnham & Anderson 2002).
 
 **IT-based MMI is particularly good for:** 
 
