@@ -346,8 +346,8 @@ summary(modavg)
 ```
   
 Because we re-leveled the treatment variable, the intercept is treatment = monoculture, landuse = arable.  
-The interaction term gives the unique effect of being in both pasture and agroforestry beyond the additive effects of pasture and agroforestry alone.  
- 
+The coefficient for the interaction term tells you how much the effect of one treatment changes depending on the level of landuse. So here the interaction term gives the unique effect of being in both pasture and agroforestry beyond the additive effects of pasture and agroforestry alone.  
+  
 Note that the output gives you unconditional SE ('adjusted SE'), which tries to account for model selection uncertainty. These are the ones to report.  
  
 ### 6.2 Quantify model selection uncertainty and incorporate this into estimates of precision 
@@ -570,7 +570,7 @@ new_data %>%
   scroll_box(width = "100%")  # adds horizontal scrolling
 ```
 
-The interaction term represents the unique effect of being in both pasture and agroforestry beyond the additive effects of pasture and agroforestry alone. The coefficient for the interaction term tells you how much the effect of one treatment changes depending on the level of landuse.
+The interaction term represents the unique effect of being in both pasture and agroforestry beyond the additive effects of pasture and agroforestry alone.  
 
 Explanation of the interaction term in this data frame:
 'c.landuse' and 'c.treatment' are both binary variables (0 or 1), so their interaction behaves like this:
