@@ -494,7 +494,7 @@ We standardised our independent variables using the `rescale` function, so that 
   
 or  
   
-`(abundance_data$bound_area - mean(abundance_data$bound_area)) / sd(abundance_data$bound_area)`
+`(abundance_data$bound_area - mean(abundance_data$bound_area)) / (2*sd(abundance_data$bound_area))`
   
 So, to interpret predictions meaningfully, we need to know the mean and SD of the original variable that we want to predict on. To show you how this works, we'll predict abundance in the two treatments for different amounts of boundary area.  
 Remember, you can only predict for the variables included in the subset of models used for model averaging. You can't predict for variables in your original model that weren't present in the 'top' models subset.  
@@ -509,7 +509,7 @@ bound_area_vals_raw <- c(min(abundance_data$bound_area, na.rm = TRUE),
                   max(abundance_data$bound_area, na.rm = TRUE))
  
 # Standardize these values using the same transformation as your model
-z_bound_area_vals <- (bound_area_vals_raw - bound_area_mean_raw) / bound_area_sd_raw
+z_bound_area_vals <- (bound_area_vals_raw - bound_area_mean_raw) / (2*bound_area_sd_raw)
  
 # Create a new data frame for prediction
 ## Always make sure the new data frame has:
@@ -526,12 +526,19 @@ new_data <- expand.grid(
 # Predict biodiversity using the fixed effects from your model (our model is the model-averaged model, called 'modavg')
 new_data$predicted_abundance <- predict(modavg, newdata = new_data, re.form = NA, type = "response") # 'type = "response"' back-transforms abundance estimates
  
-# Add original boundary area values for interpretability
-new_data$bound_area_raw <- rep(bound_area_vals_raw, each = 2)
- 
+
 # View the prediction table
 print(new_data)
 ```
+
+Now let's add the original boundary area values in for interpretability.
+```{r}
+new_data <- new_data %>%
+ dplyr::mutate(bound_area_raw = z.bound_area * (2 * bound_area_sd_raw) + bound_area_mean_raw)
+
+print(new_data)
+```
+
 
 To make this easier to interpret, replace the 0s and 1s with meaningful factor levels.
 ```{r}
