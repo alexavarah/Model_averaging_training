@@ -1,11 +1,18 @@
 ---
 title: "IT-based model averaging"
 author: "Alexa Varah"
-date: "23/07/2025"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
 output:
-  html_document: default
-  pdf_document: default
-  word_document: default
+  html_document:
+    collapsed: no
+    theme: readable
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  github_document:
+    toc: yes
+    toc_depth: 4
+    html_preview: FALSE
 ---
 
 ```{r setup, include=FALSE}
@@ -22,7 +29,8 @@ Information theoretic (IT)-based model averaging allows inferences to be drawn f
 * We’re aiming for the data-based selection of a set of best models. In other words, we'll examine the likelihood of various models (i.e., various hypotheses about reality), given the data.  
 * Inference is based on more than one model.   
   
-Here's the difference between a Frequentist approach and an Information Theoretic approach:
+  
+**Here's the difference between a Frequentist approach and an Information Theoretic approach:**
   
 | Aspect              | Frequentist Approach                                            | Information-Theoretic Approach                                    |
 |:---------------------|:-------------------------------------------------------------------|:-------------------------------------------------------------------|
@@ -36,7 +44,8 @@ Here's the difference between a Frequentist approach and an Information Theoreti
 In a frequentist approach you're asking “Is this effect statistically significant?”  
 In an Information Theoretic approach you're asking “Which model best approximates reality?”  
   
-Here's how you treat models in the two approaches:  
+  
+**Here's how you treat models in the two approaches:**  
   
 |                         | Frequentist Approach                                   | Information-Theoretic Approach                           |
 |:-------------------------|:--------------------------------------------------------|:-----------------------------------------------------------|
@@ -47,7 +56,7 @@ Here's how you treat models in the two approaches:
 | Output Emphasis         | Significance tests, confidence intervals               | Akaike weights, evidence ratios, model averaging          |
   
   
-And here's how you treat data in the two approaches:  
+**And here's how you treat data in the two approaches:** 
   
 |                       | Frequentist Approach                                     | Information-Theoretic Approach                          |
 |:------------------------|:----------------------------------------------------------|:----------------------------------------------------------|
@@ -56,11 +65,13 @@ And here's how you treat data in the two approaches:
 | Probability Perspective| Probability as long-run frequency                       | Probability as a measure of model fit via likelihood     |
 | Significance Thinking  | Emphasizes binary decisions (e.g., p < 0.05)            | Avoids dichotomous thinking; emphasizes model support    |
 | Source of Uncertainty  | From data sampling                                       | From model selection and uncertainty among models        |
-
   
-**Why information theoretic?** We use existing knowledge to inform _a priori_ the choice of predictor variables in our model (i.e., _before we look at the data_!), rather than using the data to inform our choice of variables. 
+  
+**Why information theoretic?**  
+We use existing knowledge to inform _a priori_ the choice of predictor variables in our model (i.e., _before we look at the data_!), rather than using the data to inform our choice of variables. 
 
-**Why model averaging?** The benefit of using multiple models is that they can be ranked and scaled to show model uncertainty over the set. *All* models are then used for inference. "If you have a large number of closely related models, such as in linear-regression based variable selection .... designation of a single best model is unsatisfactory because that 'best' model is often highly variable. That is, the model estimated to be best would vary from data set to data set, where replicate data sets would be collected under the same underlying process. In this situation, model averaging provides a relatively much more stabilized inference." (p.151, Burnham & Anderson 2002).
+**Why model averaging?**  
+The benefit of using multiple models is that they can be ranked and scaled to show model uncertainty over the set. *All* models are then used for inference. "If you have a large number of closely related models, such as in linear-regression based variable selection .... designation of a single best model is unsatisfactory because that 'best' model is often highly variable. That is, the model estimated to be best would vary from data set to data set, where replicate data sets would be collected under the same underlying process. In this situation, model averaging provides a relatively much more stabilized inference." (p.151, Burnham & Anderson 2002).
 
 **IT-based MMI is particularly good for:** 
 
@@ -79,11 +90,11 @@ Although IT-based MMI is not completely free of the disadvantages of stepwise me
 &nbsp;
 
 
-The process involves _a priori_ model specification, then model selection, and finally estimation of parameters and their precision.  
+The IT approach involves _a priori_ model specification, then model selection, and finally estimation of parameters and their precision.  
 &nbsp; 
 
-**A note about p-values**
-Information theoretic approaches do not use p-values. They work on a 'weight of evidence' approach. Here's a quick explainer about why NOT to look at the p-values!  
+**A note about p-values**  
+Information theoretic approaches do not use p-values. They work on a 'weight of evidence' approach. Here's a quick explainer about why NOT to look at the p-values, even though they are given in the model output:  
 Traditional significance testing (i.e. in frequentist statistics) assumes a fixed model, or in other words it assumes there is one 'true' model. In model averaging we blend models, so the sampling distribution of each parameter is not based on a single model’s assumptions - this means that traditional significance testing isn't reliable. Also, standard errors are used in the calculation of p-values but the SEs in model averaged output are not straightforward - they are unconditional SEs (these try to account for model selection uncertainty) which again makes significance testing unreliable. Another point is that if a parameter is not included in many models then its averaged coefficient will be shrunk towards zero - but this doesn't necessarily reflect its 'true' effect size or importance, so you can't rely on the p-value associated with it. So basically, ignore the p-values!!!
   
   
@@ -479,6 +490,10 @@ If you want to predict from model averaged results, you can use the `predict` fu
   
 We standardised our independent variables using the `rescale` function, so that they had a mean of 0 and a SD of 0.5 (see section 2, where we rescaled the variables). This is how `rescale` does it, using boundary area as an example:  
   
+`x_std = (x - mean(x, na.rm = TRUE)) / (2 * sd(x, na.rm = TRUE))`  
+  
+or  
+  
 `(abundance_data$bound_area - mean(abundance_data$bound_area)) / sd(abundance_data$bound_area)`
   
 So, to interpret predictions meaningfully, we need to know the mean and SD of the original variable that we want to predict on. To show you how this works, we'll predict abundance in the two treatments for different amounts of boundary area.  
@@ -548,7 +563,7 @@ Explanation of the interaction term in this data frame:
 'c.landuse' and 'c.treatment' are both binary variables (0 or 1), so their interaction behaves like this:
 
 | c.landuse | c.treatment | c.landuse:c.treatment |
-|:---------:|:-----------:|:----------------------:|
+|:---------|:-----------|:----------------------|
 |     0     |      0      |           0            |
 |     0     |      1      |           0            |
 |     1     |      0      |           0            |
@@ -556,20 +571,30 @@ Explanation of the interaction term in this data frame:
 
 
 Or, in other words:
-| landuse   | treatment | landuse:treatment |
-|:--------:|:---------:|:-----------------:|
-| arable    | MC        |        no         |
-| arable    | AF        |        no         |
-| pasture   | MC        |        no         |
-| pasture   | AF        |        yes        |
 
+| landuse  | treatment | landuse:treatment |
+|:--------|:---------|:-----------------|
+| arable   | MC        | no                |
+| arable   | AF        | no                |
+| pasture  | MC        | no                |
+| pasture  | AF        | yes               |
 
-So when there is a 1 in the interaction column, that means the model is predicting 
+  
 # Useful references  
 [Burnham & Anderson 2002](https://www.springer.com/gp/book/9780387953649)  
 [Symonds & Moussalli 2011](https://link.springer.com/article/10.1007/s00265-010-1037-6)  
 [Harrison et al 2018](https://peerj.com/articles/4794/)  
 [Burnham et al 2011](https://link.springer.com/article/10.1007/s00265-010-1029-6)  
 [Dormann et al 2018](https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/ecm.1309)    
-
-
+  
+# Glossary
+  
+**Sampling distribution**  
+The entire distribution of the estimate over repeated samples. In more detail: This is the full probability distribution of an estimator (like a parameter estimate) across many hypothetical repeated samples from the population. It tells you how the estimate varies from sample to sample. The sampling distribution of each parameter changes when you average models because you’re combining information from multiple models, not relying on one fixed model (as you would in frequentist stats).  
+  
+**Standard error (SE)**  
+The standard deviation (spread) of the sampling distribution. In more detail: SE is a summary measure of the sampling distribution — specifically, it’s the standard deviation of the sampling distribution. It quantifies the average amount of variability or uncertainty around the estimate.  
+  
+**Standard deviation (SD)**  
+Measures the spread or variability of values around their mean in a data set or distribution. In other words, it tells you how much the individual values typically differ from the average. In model averaging, we aren’t typically computing the SD of raw data values. Instead, we're often concerned with the standard deviation of parameter estimates across models - so in IT approaches, SD refers to the variability of an estimated parameter across models.  
+  
