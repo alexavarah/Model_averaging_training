@@ -63,6 +63,7 @@ library(MuMIn) # for multi-model inference
 library(knitr)
 library(kableExtra) # for pretty tables
 library(here) # for a more robust & reproducible approach than relative paths
+library(performance) # for checking overdispersion
 ```
 
 
@@ -83,6 +84,8 @@ abundance_data <- read.csv(here::here("data", "solitary_bees_clean.csv"), header
     site = factor(site), # set as factor
     treatment = factor(treatment), # set as factor
     year = factor(year), # set as factor
+    landuse = factor(landuse),
+    field = factor(field),
     # create a julian date (number of days since 1st March)
     jdate = difftime(date, as.Date(paste(01, 03, year, sep="-"),"%d-%m-%Y")),
     jdate = as.integer(jdate)
@@ -95,8 +98,8 @@ abundance_data <- read.csv(here::here("data", "solitary_bees_clean.csv"), header
   droplevels() %>% 
   # fill in the missing data on boundary area from site WAF - use made-up values
   dplyr::mutate(bound_area = ifelse(
-    is.na(bound_area) & site == "WAF" & year == 2011 & treatment == "AF", 2000,
-    ifelse(is.na(bound_area) & site == "WAF" & year == 2011 & treatment == "MC", 2050, bound_area)
+    is.na(bound_area) & site == "WAF" & year == 2011 & treatment == "AF", 2000, #boundary area was 2000m2
+    ifelse(is.na(bound_area) & site == "WAF" & year == 2011 & treatment == "MC", 2050, bound_area) #boundary area was 2050m2
   )) %>% 
   # Generate some other variables that might affect sampled insect abundance
   dplyr::mutate(sun = ifelse(treatment == "AF",
@@ -138,6 +141,18 @@ abundance_data <- read.csv(here::here("data", "solitary_bees_clean.csv"), header
 ```{r}
 glimpse(abundance_data)
 ```
+
+What's the reference level for 'treatment'?
+```{r}
+levels(abundance_data$treatment)
+```
+It's agroforestry, because R automatically orders things alphabetically. Let's relevel the 'treatment' variable so that the monoculture is the reference level. This way, if agroforestry increases abundance, we will see a positive effect of AF in the model, rather than seeing a negative effect of monoculture.  
+```{r}
+abundance_data$treatment <- relevel(abundance_data$treatment, ref = "MC")
+levels(abundance_data$treatment)
+```
+
+
 
 Treatments were sampled equally in each year:
 ```{r}
@@ -205,10 +220,10 @@ qqline(resid(gm))
 hist(residuals(gm))
 ```
 
-This will do for now - we're not concerned with model fit here as it's fake data anyway, we just want to learn the steps. However, we will check for overdispersion as we've used a Poisson error distribution (it won't be a problem here as we generated the data, but with your own data you should always check!).  
+This will do for now - we're not concerned with model fit here as it's fake data anyway, we just want to learn the steps. However, we will check for overdispersion as we've used a Poisson error distribution (it won't be a problem here as we generated the data, but with your own data you should always check!). There are different ways to check overdispersion and you should do some reading on it if it applied to your data, but we'll use the 'check_overdispersion' function from the 'performance' package here.  
+  
 ```{r}
-library(performance)
-check_overdispersion(gm)
+performance::check_overdispersion(gm)
 ```
 Once you are happy that your global model fits and doesn't violate any assumptions, you can go ahead with creating models for alternative hypotheses.  
   
@@ -219,22 +234,24 @@ Once you are happy that your global model fits and doesn't violate any assumptio
 We use the *dredge* function from the [*MuMIN*](https://www.rdocumentation.org/packages/MuMIn/versions/1.43.17) package, which is a multi-model inference package. You won't keep all of the sub-models generated, just those with the highest relative worth.  
 
 This process can take a while (more predictors = more time).  
-
+  
+Because we have a small data set, we will use AICc to rank models.  
+  
 ```{r Generate-model-set}
 modset <- dredge(gm, rank = "AICc") # AICc is the default so 'rank =' is obsolete here. Rank options = AIC, QAIC, BIC.
 head(modset, n=10)
 ```
 
 The output shows the top 10 models of all the possible sub-models, ranked by AIC~*c*~.  
-Column 1 is the model number in the set of generated sub-models. Column 2 is the estimated intercept. The following columns give the variables that are present in these models: where a variable is present in a model, the parameter estimate is given. Next are the degrees of freedom, the log likelihood ('logLik'), AIC~*c*~, the change in AIC~*c*~ ('delta'), and the Akaike weight ('weight').  
+Column 1 is the model number in the set of generated sub-models. Column 2 is the estimated intercept. The following columns give the variables that are present in these models: where a variable is present in a model, the parameter estimate is given. Next are the degrees of freedom, the log likelihood ('logLik'), AIC~*c*~, the change in AIC~*c*~ ('delta'), and the Akaike weight of the model ('weight').  
 The Akaike weight ($w$~*$i$*~) indicates the relative likelihood of a model, *given the data and the set of models*. Akaike weights are computed by normalising the likelihood values, and provide a way of scaling and interpreting the changes in AIC~*c*~ values. Akaike weights of all models in the set add up to 1, so if you add or remove a model from the set you need to recompute $w$~*$i$*~ for all the models in the new set. Unless the top model has $w$~*$i$*~ $\ge$ 0.9, you should use model averaging.
 
-In the output above, we can see that the 'best' model in the set is not convincingly the best model: the evidence ratio for model 3 versus model 68 is only 1.1 (i.e., $w$~0.238~ / $w$~0.213~ = 1.117). This weak support for the 'best' model suggests that we would expect to see a lot of variation in the selected best model from sample to sample if we could draw multiple independent samples; in other words, the data-based model selection uncertainty is likely to be high. This indicates that these data are inadequate to reach strong inference so we should definitely use model averaging to make more robust inference (MMI).   
+In the output above, we can see that the 'best' model in the set is not convincingly the best model: the evidence ratio for model 3 versus model 68 is only 1.1 (i.e., model 3 $w$~0.180~ / model 68 $w$~0.161~ = 1.118). This weak support for the 'best' model suggests that we would expect to see a lot of variation in the selected best model from sample to sample if we could draw multiple independent samples; in other words, the data-based model selection uncertainty is likely to be high. This indicates that these data are inadequate to reach strong inference so we should definitely use model averaging to make more robust inference (multi-model inference, or MMI).   
 &nbsp; 
 
 ## 5. Create a 'top models' set
 
-By comparing these models against each other to find their relative worth, we can refine the model set created in step 3 above, retaining just those models for which there is good empirical support. In this way we create a smaller set of candidate models to use for inference.  
+By comparing these models against each other to find their relative worth, we can refine the model set created in step 4 above, retaining just those models for which there is good empirical support. In this way we create a smaller set of candidate models to use for inference.  
 
 Models in the set are ranked by AIC (or AIC~*c*~ for small sample sizes, or QAIC for overdispersed data, etc.).  
 There is substantial empirical support for a model $i$ with difference in AIC from the top model ($\Delta$~$i$~) of 0-2, considerably less (but still some) support for models with $\Delta$~$i$~ = 4-7 and none for models with $\Delta$~$i$~ > 10 [(Burnham & Anderson 2002)](http://sutlib2.sut.ac.th/sut_contents/H79182.pdf). 
@@ -248,7 +265,8 @@ How many models has this resulted in?
 ```{r}
 length(topmods)
 ```
-
+  
+This is OK - we have 6 sites, so here _n_=6. You don't want the number of models to be greater than _n_.  
 &nbsp; 
 
 ## 6. Use the top models set for inference  
@@ -265,27 +283,28 @@ In other words, the 'full' coefficients set terms to 0 if they are not included 
 
 The 'full' method is useful if you're more interested in *which* parameters are having an effect. The 'conditional' (or natural average) method is useful if you're more interested in effect sizes (I'm still looking for the ref for this). In this example, the conclusions will be the same from either method. We'll use the conditional coefficients as I'm interested in effect sizes.  
 
+Make sure to specify `fit = TRUE` in `model.avg()` so that the underlying models are stored for prediction later on (if you're not going to be predicting from the averaged model, you don't need this bit).  
 ```{r Model-average}
-modavg <- model.avg(topmods)
+modavg <- model.avg(topmods, fit = TRUE)
 summary(modavg)
 ```
 
 ### 6.2 Quantify model selection uncertainty and incorporate this into estimates of precision 
-If several other independent data sets were collected, would the same top model set be selected? Very possibly not. This model selection uncertainty must be included in measures of precision of parameter estimates and is included in the 'adjusted SE' (aka unconditional SE) values given in the output (see above).  
+If several other independent data sets were collected, would the same top model set be selected? Very possibly not. This model selection uncertainty must be included in measures of precision of parameter estimates: it is automatically included for you in the 'adjusted SE' (aka unconditional SE) values given in the output (see above).  
 
-### 6.3 Work out the relative importance of predictor variables.  
+### 6.3 Calculate the relative importance of predictor variables.  
 To calculate the relative variable importance ($w$~*$i$$p$*~) you simply sum the Akaike weights ($w$~*$i$*~) of the models in which the parameter appears.
 
-For example, *treatment* (parameter 2) appears in all models in the top model set. You therefore add the Akaike weights of all models (`r round(Weights(modavg)[1],2)` + `r round(Weights(modavg)[2],2)` + `r round(Weights(modavg)[3],2)` + `r round(Weights(modavg)[4],2)` + `r round(Weights(modavg)[5],2)` + `r round(Weights(modavg)[6],2)`) to give $w$~*$i$$p$*~ = 1 for *treatment*.  
+For example, *treatment* (parameter 2) appears in all models in the top model set. You therefore add the Akaike weights of all models (`r round(Weights(modavg)[1],2)` + `r round(Weights(modavg)[2],2)` + `r round(Weights(modavg)[3],2)` + `r round(Weights(modavg)[4],2)` + `r round(Weights(modavg)[5],2)` + `r round(Weights(modavg)[6],2)`) to give relative variable importance $w$~*$i$$p$*~ = 1 for *treatment*.  
   
-The *interaction* term (parameter 4) only appears in models two and four, which have $w$~*$i$$p$*~ = `r round(Weights(modavg)[2],4)` and $w$~*$i$$p$*~ = `r round(Weights(modavg)[4],4)`. The relative importance ($w$~*$i$$p$*~) of the *interaction* between treatment and land use is therefore just `r round(Weights(modavg)[2],4)` + `r round(Weights(modavg)[4],4)` = 0.35 (i.e. not important).
+The *interaction* term (parameter 4) only appears in the second and fourth models (look at the component models and the term codes in the summary above). These models have $w$~*$i$$p$*~ = `r round(Weights(modavg)[2],4)` and $w$~*$i$$p$*~ = `r round(Weights(modavg)[4],4)` respectively. The relative importance ($w$~*$i$$p$*~) of the *interaction* between treatment and land use is therefore just `r round(Weights(modavg)[2],4)` + `r round(Weights(modavg)[4],4)` = 0.35 (i.e. not important).
   
-The *MuMIn* package does this for you:
+The *MuMIn* package does these calculations for you:
 ```{r Get-relative-variable-importance}
 sw(modavg)
 ```
   
-The answers here are more accurate (when doing it by hand we used rounded values from the model summary).  
+The answers here are more accurate  than when doing it by hand (because by hand we used rounded values from the model summary).  
   
 ### 6.4 Calculate confidence intervals:
 ```{r CIs}
@@ -294,7 +313,7 @@ confint(modavg,level = 0.95)
   
 When reporting your findings, talk about 'strength of evidence'. Avoid using the word 'significant' as we haven't done hypothesis testing and haven't used $p$ values. These have no place in this method. **Do** give estimates of effect size and associated precision.
 
-# 7. Create a table of results
+# Create a table of results
 You can present results in other ways, too, but this table gives all the important information and looks neat!
 ```{r}
 # 1. Extract top model parameters and remove columns with all NAs
@@ -384,29 +403,117 @@ rm(top.mod.params, ci, varimp, modgof)
 ```
 
 ```{r Make-pretty-results-table, echo=FALSE, message=FALSE, warning = FALSE, }
-mod_nb <- length(topmods)
-par_nb <- nrow(modvars)
+mod_n <- length(topmods)
+par_n <- nrow(modvars)
 
-kable(results, booktabs = TRUE, align = c('l', rep('c', mod_nb), rep('r', 4))) %>%
+kable(results, booktabs = TRUE, align = c('l', rep('c', mod_n), rep('r', 4))) %>%
   kable_classic(full_width = FALSE, position = "left", html_font = "Arial") %>%
-  add_header_above(c(" " = 1, "Model rank" = mod_nb, "Model averaged coefficients" = 4)) %>%
-  column_spec(2:(mod_nb + 1), width = "1.7cm") %>%
-  column_spec((mod_nb + 2):(mod_nb + 3), width = "1.5cm") %>%
-  column_spec(mod_nb + 4, width = "3cm") %>%
-  column_spec(mod_nb + 5, width = "1.3cm") %>%
-  row_spec(par_nb, extra_css = "border-bottom: 1px dotted") %>%
+  add_header_above(c(" " = 1, "Model rank" = mod_n, "Model averaged coefficients" = 4)) %>%
+  column_spec(2:(mod_n + 1), width = "1.7cm") %>%
+  column_spec((mod_n + 2):(mod_n + 3), width = "1.5cm") %>%
+  column_spec(mod_n + 4, width = "3cm") %>%
+  column_spec(mod_n + 5, width = "1.3cm") %>%
+  row_spec(par_n, extra_css = "border-bottom: 1px dotted") %>%
   row_spec(0, extra_css = "border-bottom: 1px solid")
 ```
-Key: $\beta$, averaged parameter estimate; $w$<sub>$ip$</sub>, relative variable importance; SE, adjusted standard error; df, degrees of freedom; delta, change in AICc from top model; weight, Akaike weight.
+Key: $\beta$, averaged parameter estimate; $w$<sub>$ip$</sub>, relative variable importance; SE, adjusted standard error; df, degrees of freedom; delta, change in AICc from top model; weight, Akaike weight. The levels of 'treatment' are _monoculture_ and _agroforestry_; the levels of 'landuse' are _arable_ and _pasture._ The intercept represents monoculture treatments in arable land use. 
 
 Now, how could we have done that without R?!!
   
 **Your final task** is to write a sentence or two explaining what the results tell us. Is treatment important? Are any other variables important? How can you tell?  
  
-
 &nbsp; 
 
-# 8. Useful references  
+# Predict
+If you want to predict from model averaged results, you can use the `predict` function just like you would for any other linear model.  
+  
+We standardised our independent variables using the `rescale` function, so that they had a mean of 0 and a SD of 0.5 (see section 2, where we rescaled the variables). This is how `rescale` does it, using boundary area as an example:  
+  
+`(abundance_data$bound_area - mean(abundance_data$bound_area)) / sd(abundance_data$bound_area)`
+  
+So, to interpret predictions meaningfully, we need to know the mean and SD of the original variable that we want to predict on. To show you how this works, we'll predict abundance in the two treatments for different amounts of boundary area.  
+Remember, you can only predict for the variables included in the subset of models used for model averaging. You can't predict for variables in your original model that weren't present in the 'top' models subset.  
+```{r}
+# Get mean and SD of the original (unstandardized) bound_area variable
+bound_area_mean_raw <- mean(abundance_data$bound_area, na.rm = TRUE)
+bound_area_sd_raw <- sd(abundance_data$bound_area, na.rm = TRUE)
+ 
+# Define the bound_area values you want to predict for: min, mean, max (in original scale)
+bound_area_vals_raw <- c(min(abundance_data$bound_area, na.rm = TRUE),
+                  bound_area_mean_raw,
+                  max(abundance_data$bound_area, na.rm = TRUE))
+ 
+# Standardize these values using the same transformation as your model
+z_bound_area_vals <- (bound_area_vals_raw - bound_area_mean_raw) / bound_area_sd_raw
+ 
+# Create a new data frame for prediction
+## Always make sure the new data frame has:
+## * Standardized versions of predictors (if model is standardized)
+## * All required variables present and named correctly (must match what's in your model)
+## * Matching factor levels
+new_data <- expand.grid(
+  z.bound_area = z_bound_area_vals, # standardized bound_area values
+  c.treatment = c(0, 1),    # levels(abundance_data$treatment) gives "AF" "MC", so 0 = agroforestry, 1 = monoculture
+  c.landuse = c(0, 1),      # levels(abundance_data$landuse) gives "a" "p", so 0 = arable and 1 = pasture
+  `c.landuse:c.treatment` = c(0, 1)
+)
+
+# Predict biodiversity using the fixed effects from your model (our model is the model-averaged model, called 'modavg')
+new_data$predicted_abundance <- predict(modavg, newdata = new_data, re.form = NA, type = "response") # 'type = "response"' back-transforms abundance estimates
+ 
+# Add original boundary area values for interpretability
+new_data$bound_area_raw <- rep(bound_area_vals_raw, each = 2)
+ 
+# View the prediction table
+print(new_data)
+```
+
+To make this easier to interpret, replace the 0s and 1s with meaningful factor levels.
+```{r}
+new_data <- new_data %>%
+  dplyr::mutate(
+    c.treatment = case_when(
+      c.treatment == 0 ~ "AF",
+      c.treatment == 1 ~ "MC"
+    ),
+    c.landuse = case_when(
+      c.landuse == 0 ~ "arable",
+      c.landuse == 1 ~ "pasture"
+    )
+  ) %>% 
+  rename(
+    treatment = c.treatment,
+    landuse = c.landuse,
+    `landuse:treatment` = `c.landuse:c.treatment`
+  ) %>% 
+  # change column order
+  dplyr::relocate(z.bound_area, .after = bound_area_raw)
+
+print(new_data)
+```
+
+Explanation of the interaction term in this data frame:
+'c.landuse' and 'c.treatment' are both binary variables (0 or 1), so their interaction behaves like this:
+
+| c.landuse | c.treatment | c.landuse:c.treatment |
+|:---------:|:-----------:|:----------------------:|
+|     0     |      0      |           0            |
+|     0     |      1      |           0            |
+|     1     |      0      |           0            |
+|     1     |      1      |           1            |
+
+
+Or, in other words:
+| landuse   | treatment | landuse:treatment |
+|:--------:|:---------:|:-----------------:|
+| arable    | AF        |        no         |
+| arable    | MC        |        no         |
+| pasture   | AF        |        no         |
+| pasture   | MC        |        yes        |
+
+
+So when there is a 1 in the interaction column, that means the model is predicting 
+# Useful references  
 [Burnham & Anderson 2002](https://www.springer.com/gp/book/9780387953649)  
 [Symonds & Moussalli 2011](https://link.springer.com/article/10.1007/s00265-010-1037-6)  
 [Harrison et al 2018](https://peerj.com/articles/4794/)  
