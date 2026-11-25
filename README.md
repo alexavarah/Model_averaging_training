@@ -1,10 +1,3 @@
----
-output:
-  github_document:
-    toc: true
-    toc_depth: 2
----
-
 # IT-based Model Averaging Training
 
 Training materials introducing **information-theoretic (IT) approaches**, **multi-model inference (MMI)** and **model averaging** in ecology using R.
