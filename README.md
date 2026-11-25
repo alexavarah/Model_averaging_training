@@ -61,13 +61,13 @@ Inference & prediction
 ```text
 Model_averaging_training/
 ├── data/
-│   └── Example ecological datasets
+│   └── Example ecological dataset
 │
 ├── scripts/
-│   └── Training materials and worked examples
+│   └── Training materials
 │
 ├── output/
-│   └── Example outputs
+│   └── This is where you save your outputs
 │
 ├── Model_averaging_training.Rproj
 ├── README.md
