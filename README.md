@@ -97,10 +97,8 @@ in RStudio.
 The complete training tutorial can be found in:
 
 ```text
-scripts/IT_based_model_averaging.Rmd
+scripts/Model_averaging_training.Rmd
 ```
-
-*(Adjust the filename above if required.)*
 
 Work through the document sequentially. All code chunks are fully reproducible.
 
@@ -143,11 +141,13 @@ The tutorial uses ecological survey data from English agroforestry and monocultu
 Variables used in the modelling exercise include:
 
 - Treatment (agroforestry vs monoculture)
+- Numbers of solitary bees (response variable)
 - Land use
 - Boundary habitat area
-- Hedgerow density
-- Weather variables
-- Seasonal effects
+- Hedgerow variables
+- Amount of semi-natural habitat nearby
+- Date
+- System age
 
 A mixed-effects framework is used to account for site-level structure.
 
